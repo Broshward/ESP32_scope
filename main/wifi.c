@@ -12,7 +12,7 @@
 #include "lwip/err.h"
 #include "lwip/sys.h"
 
-#include "wifi_wpa_set.h"
+#include "conf.h"
 
 /* The examples use WiFi configuration that you can set via project configuration menu
 
