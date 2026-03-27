@@ -3,11 +3,44 @@
 import socket
 import numpy as np
 import sys
+import threading
+import termios,tty
 
 # Настройки
+ESP32_IP = "192.168.1.51"
+threshold = 2000
 UDP_PORT = 8080
 WIDTH = 120
 HEIGHT = 30
+
+# Функция для чтения клавиши без Enter
+def getch():
+    fd = sys.stdin.fileno()
+    old_settings = termios.tcgetattr(fd)
+    try:
+        tty.setraw(sys.stdin.fileno())
+        ch = sys.stdin.read(1)
+    finally:
+        termios.tcsetattr(fd, termios.TCSADRAIN, old_settings)
+    return ch
+
+def keyboard_listener():
+    global threshold
+    print("Управление: W - порог выше, S - порог ниже")
+    while True:
+        key = sys.stdin.read(1) # Нужно нажимать Enter или использовать библиотеку 'getch'
+        if key == 'w':
+            threshold = min(threshold + 100, 4000)
+            sock.sendto(f"T{threshold}".encode(), (ESP32_IP, UDP_PORT))
+        elif key == 's':
+            threshold = max(threshold - 100, 100)
+            sock.sendto(f"T{threshold}".encode(), (ESP32_IP, UDP_PORT))
+        elif key == 'q':
+            sys.exit(0)
+
+# Запускаем поток команд
+threading.Thread(target=keyboard_listener, daemon=True).start()
+
 
 sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
 sock.bind(("", UDP_PORT)) # Слушаем всех на этом порту
@@ -34,9 +67,9 @@ while True:
                 elif is_grid: line += "·"
                 else: line += " "
             frame.append(line)
-            
         sys.stdout.write("\n".join(frame) + "\n")
         sys.stdout.flush()
 
+        print(f"Current Trigger Threshold: {threshold}")
     except socket.timeout:
         continue

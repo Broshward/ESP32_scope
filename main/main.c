@@ -16,9 +16,11 @@
 #define PORT 8080
 #define UDP_PORT       8080
 #define FRAME_SIZE     512            // Количество точек в одном кадре
-#define THRESH_LOW     1800           // Гистерезис: порог внизу
-#define THRESH_HIGH    2200           // Гистерезис: порог вверху
 #define READ_LEN       2048           // Размер сырого буфера для поиска триггера
+
+int g_threshold = 2000;
+int g_thresh_low = 1800;
+int g_thresh_high = 2200;
 
 
 static const char *TAG = "UDP_SCOPE";
@@ -45,8 +47,33 @@ void udp_scope_task(void *pvParameters) {
     
     ESP_LOGI(TAG, "UDP Scope started. Sending to %s:%d", PC_IP, UDP_PORT);
 
+
+    // Добавляем bind, чтобы ESP32 слушала входящие пакеты на порту 8080
+    struct sockaddr_in serv_addr;
+    serv_addr.sin_addr.s_addr = htonl(INADDR_ANY);
+    serv_addr.sin_family = AF_INET;
+    serv_addr.sin_port = htons(UDP_PORT);
+    bind(sock, (struct sockaddr *)&serv_addr, sizeof(serv_addr));
+
+    char rx_buffer[16];
+    struct sockaddr_in source_addr;
+    socklen_t socklen = sizeof(source_addr);
+
     while (1) {
-        uint32_t ret_num = 0;
+        // ПРОВЕРКА КОМАНД (неблокирующая)
+        int len = recvfrom(sock, rx_buffer, sizeof(rx_buffer) - 1, MSG_DONTWAIT, 
+                           (struct sockaddr *)&source_addr, &socklen);
+        if (len > 0) {
+            rx_buffer[len] = 0;
+            if (rx_buffer[0] == 'T') {
+                g_threshold = atoi(&rx_buffer[1]);
+                g_thresh_low = g_threshold - 150;
+                g_thresh_high = g_threshold + 150;
+                ESP_LOGI(TAG, "New Threshold set: %d", g_threshold);
+            }
+        }
+
+		uint32_t ret_num = 0;
         // 2. Читаем данные из АЦП (DMA)
         esp_err_t ret = adc_continuous_read(adc_handle, raw_buf, READ_LEN, &ret_num, 0);
 
@@ -61,11 +88,11 @@ void udp_scope_task(void *pvParameters) {
             for (int i = 0; i < count - FRAME_SIZE; i++) {
                 uint16_t val = p[i].type1.data & 0xFFF;
 
-                if (!ready_to_trigger && val < THRESH_LOW) {
+                if (!ready_to_trigger && val < g_thresh_low) {
                     ready_to_trigger = true;
                 }
 
-                if (ready_to_trigger && val > THRESH_HIGH) {
+                if (ready_to_trigger && val > g_thresh_high) {
                     start_idx = i;
                     break;
                 }
