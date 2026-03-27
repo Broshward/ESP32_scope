@@ -1,3 +1,3 @@
 
-#define WIFI_SSID       "your ssid" 
-#define WIFI_PASS		"your passwd"
+#define WIFI_SSID      "aero"
+#define WIFI_PASS      "Smokeonthewater130"

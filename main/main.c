@@ -12,9 +12,11 @@
 
 #include "wifi.h"
 
+#define READ_LEN 512
 #define PORT 8080
 
-static void tcp_server_task(void *pvParameters) {
+static void tcp_server_task(void *pvParameters) 
+{
     char addr_str[128];
     int addr_family = AF_INET;
     int ip_protocol = IPPROTO_IP;
@@ -43,20 +45,28 @@ static void tcp_server_task(void *pvParameters) {
         ESP_LOGI("TCP", "Client connected!");
 
         // Сюда мы передадим хендл АЦП и будем слать данные
-        uint8_t buffer[256];
+        uint8_t buffer[READ_LEN];
         uint32_t ret_num = 0;
         adc_continuous_handle_t adc_handle = (adc_continuous_handle_t)pvParameters;
 
         while (1) {
-            esp_err_t ret = adc_continuous_read(adc_handle, buffer, 256, &ret_num, 0);
-            if (ret == ESP_OK) {
-                // Шлем сырые байты в сокет
-                int err = send(sock, buffer, ret_num, 0);
-                if (err < 0) {
-                    ESP_LOGE("TCP", "Error occurred during sending: errno %d", errno);
-                    break;
-                }
-            }
+            esp_err_t ret = adc_continuous_read(adc_handle, buffer, READ_LEN, &ret_num, 0);
+            int threshold = 2000;
+			bool triggered = false;
+			uint16_t last_val = 0;
+
+			for (int i = 0; i < ret_num / 2; i++) {
+				uint16_t current_val = ((uint16_t*)buffer)[i] & 0xFFF;
+				
+				// Ищем момент, когда сигнал пошел вверх через порог
+				if (!triggered && last_val < threshold && current_val >= threshold) {
+					triggered = true;
+					// Нашли начало кадра! Отправляем данные начиная отсюда
+					send(sock, &buffer[i*2], (ret_num - i*2), 0);
+					break; 
+				}
+				last_val = current_val;
+			}
             vTaskDelay(pdMS_TO_TICKS(10)); 
         }
 
@@ -66,9 +76,9 @@ static void tcp_server_task(void *pvParameters) {
 }
 
 static const char *TAG = "SCOPE";
-#define READ_LEN 256
 
-void app_main(void) {
+void app_main(void) 
+{
     //Initialize NVS
     esp_err_t ret = nvs_flash_init();
     if (ret == ESP_ERR_NVS_NO_FREE_PAGES || ret == ESP_ERR_NVS_NEW_VERSION_FOUND) {
@@ -85,7 +95,6 @@ void app_main(void) {
 
     ESP_LOGI(TAG, "ESP_WIFI_MODE_STA");
     wifi_init_sta();
-
 
 
     adc_continuous_handle_t handle = NULL;
