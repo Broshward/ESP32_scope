@@ -10,13 +10,14 @@
 #include "esp_wifi.h"
 #include "nvs_flash.h"
 #include "freertos/semphr.h"
+#include "esp_task_wdt.h"
 
 #include "wifi.h"
 #include "conf.h"
 
 #define PORT 8080
 #define UDP_PORT       8080
-#define FRAME_SIZE     512            // Количество точек в одном кадре
+#define FRAME_SIZE     1024            // Количество точек в одном кадре
 #define READ_LEN       4096           // Размер сырого буфера для поиска триггера
 
 int g_threshold = 2000;
@@ -51,6 +52,55 @@ void configure_adc(adc_continuous_handle_t handle, uint32_t freq)
     ESP_ERROR_CHECK(adc_continuous_config(handle, &dig_cfg));
 }
 
+void feedback_command_task(void *pvParameters)
+{
+    int sock = socket(AF_INET, SOCK_DGRAM, IPPROTO_IP);
+    if (sock < 0) {
+        ESP_LOGE(TAG, "Unable to create socket: errno %d", errno);
+        vTaskDelete(NULL);
+        return;
+    }
+    // Добавляем bind, чтобы ESP32 слушала входящие пакеты на порту 8080
+    struct sockaddr_in serv_addr;
+    serv_addr.sin_addr.s_addr = htonl(INADDR_ANY);
+    serv_addr.sin_family = AF_INET;
+    serv_addr.sin_port = htons(UDP_PORT);
+    bind(sock, (struct sockaddr *)&serv_addr, sizeof(serv_addr));
+
+    char rx_buffer[16];
+    struct sockaddr_in source_addr;
+    socklen_t socklen = sizeof(source_addr);
+ 
+	while(1){
+        // ПРОВЕРКА КОМАНД (неблокирующая)
+        int len = recvfrom(sock, rx_buffer, sizeof(rx_buffer) - 1, MSG_DONTWAIT, 
+                           (struct sockaddr *)&source_addr, &socklen);
+        if (len > 0) {
+            rx_buffer[len] = 0;
+            if (rx_buffer[0] == 'T') {
+                g_threshold = atoi(&rx_buffer[1]);
+                g_thresh_low = g_threshold - 150;
+                g_thresh_high = g_threshold + 150;
+                ESP_LOGI(TAG, "New Threshold set: %d", g_threshold);
+            }
+			if (rx_buffer[0] == 'S') {
+				g_scale = atoi(&rx_buffer[1]);
+				if (g_scale < 1) g_scale = 1;
+				ESP_LOGI(TAG, "New Scale: %d", g_scale);
+			}
+			if (rx_buffer[0] == 'F') {
+				uint32_t val = strtoul(&rx_buffer[1], NULL, 10);
+				if (val >= 20000 && val <= 2000000) {
+					target_freq = val;
+					need_reconfig = true;
+				}
+			}
+        }
+		vTaskDelay(pdMS_TO_TICKS(1000));
+	}
+
+}
+
 void udp_scope_task(void *pvParameters) 
 {
     adc_continuous_handle_t adc_handle = (adc_continuous_handle_t)pvParameters;
@@ -77,18 +127,9 @@ void udp_scope_task(void *pvParameters)
     ESP_LOGI(TAG, "UDP Scope started. Sending to %s:%d", PC_IP, UDP_PORT);
 
 
-    // Добавляем bind, чтобы ESP32 слушала входящие пакеты на порту 8080
-    struct sockaddr_in serv_addr;
-    serv_addr.sin_addr.s_addr = htonl(INADDR_ANY);
-    serv_addr.sin_family = AF_INET;
-    serv_addr.sin_port = htons(UDP_PORT);
-    bind(sock, (struct sockaddr *)&serv_addr, sizeof(serv_addr));
-
-    char rx_buffer[16];
-    struct sockaddr_in source_addr;
-    socklen_t socklen = sizeof(source_addr);
- 
+	ESP_ERROR_CHECK(esp_task_wdt_add(NULL)); 
     while (1) {
+		esp_task_wdt_reset(); // Сбрасываем ватчдог вручную каждую итерацию		
         if (need_reconfig) {
             xSemaphoreTake(adc_mutex, portMAX_DELAY);
             adc_continuous_stop(adc_handle);
@@ -100,31 +141,6 @@ void udp_scope_task(void *pvParameters)
 			printf("%d\n",(int)target_freq);
         }
 		
-
-        // ПРОВЕРКА КОМАНД (неблокирующая)
-        int len = recvfrom(sock, rx_buffer, sizeof(rx_buffer) - 1, MSG_DONTWAIT, 
-                           (struct sockaddr *)&source_addr, &socklen);
-        if (len > 0) {
-            rx_buffer[len] = 0;
-            if (rx_buffer[0] == 'T') {
-                g_threshold = atoi(&rx_buffer[1]);
-                g_thresh_low = g_threshold - 150;
-                g_thresh_high = g_threshold + 150;
-                ESP_LOGI(TAG, "New Threshold set: %d", g_threshold);
-            }
-			if (rx_buffer[0] == 'S') {
-				g_scale = atoi(&rx_buffer[1]);
-				if (g_scale < 1) g_scale = 1;
-				ESP_LOGI(TAG, "New Scale: %d", g_scale);
-			}
-			if (rx_buffer[0] == 'F') {
-				uint32_t val = strtoul(&rx_buffer[1], NULL, 10);
-				if (val >= 20000 && val <= 2000000) {
-					target_freq = val;
-					need_reconfig = true;
-				}
-			}
-        }
 
 
         // Читаем данные из АЦП (DMA)
@@ -169,18 +185,20 @@ void udp_scope_task(void *pvParameters)
 					sendto(sock, frame_to_send, FRAME_SIZE * sizeof(uint16_t), 0, 
 						   (struct sockaddr *)&dest_addr, sizeof(dest_addr));
 
-					// 5. Ограничение FPS (25-30 кадров в секунду)
-					vTaskDelay(pdMS_TO_TICKS(40)); 
+					vTaskDelay(pdMS_TO_TICKS(100)); 
 				}
+				else 
+					vTaskDelay(pdMS_TO_TICKS(1));
 			}
             xSemaphoreGive(adc_mutex);
 		}
         // Небольшая пауза, чтобы не блокировать процессор полностью
-        vTaskDelay(pdMS_TO_TICKS(10)); 
     }
 
     free(raw_buf);
     free(frame_to_send);
+    esp_task_wdt_delete(NULL);
+    vTaskDelete(NULL);	
 }
 
 void app_main(void) 
@@ -214,7 +232,7 @@ void app_main(void)
 
     // 2. Настройка параметров АЦП
     adc_continuous_config_t dig_cfg = {
-        .sample_freq_hz = 1000 * 1000, // Для начала 100 кГц, чтобы не завалить лог
+        .sample_freq_hz = 2000 * 1000, // Для начала 100 кГц, чтобы не завалить лог
         .conv_mode = ADC_CONV_SINGLE_UNIT_1,
         .format = ADC_DIGI_OUTPUT_FORMAT_TYPE1,
     };
@@ -233,6 +251,14 @@ void app_main(void)
     //ESP_ERROR_CHECK(adc_continuous_start(handle));
 
 	
-	xTaskCreate(udp_scope_task, "udp_scope_task", 4096, (void*)handle, 5, NULL);
+	//xTaskCreate(udp_scope_task, "udp_scope_task", 4096, (void*)handle, 5, NULL);
+	xTaskCreatePinnedToCore(udp_scope_task, "udp_scope", 4096, (void*)handle, 
+                        10,  // Высокий приоритет
+                        NULL, 
+                        1); // Ядро 1
+	xTaskCreatePinnedToCore(feedback_command_task, "command_task", 4096, (void*)handle, 
+                        1,  
+                        NULL, 
+                        0); // Ядро 
 
 }
