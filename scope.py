@@ -12,10 +12,22 @@ UDP_PORT = 8080
 WIDTH = 120
 HEIGHT = 30
 
-v_threshold = 2000
-sample_freq = 2000000
-t_scale = 1
-tr_state = 1
+v_threshold = 2000      # Vertical threshold(voltage threshold)
+sample_freq = 2000000   # Sample frequency
+t_scale = 1             # Time scale
+tr_state = 1            # Trigger state (on/off)
+
+def get_time_div():
+    # Время одного деления в секундах
+    time_per_div = (t_scale / sample_freq) * 10
+    
+    # Красивое форматирование (мс или мкс)
+    if time_per_div < 0.001:
+        return f"{time_per_div * 1000000:.1f} us/div"
+    elif time_per_div < 1:
+        return f"{time_per_div * 1000:.1f} ms/div"
+    else:
+        return f"{time_per_div:.2f} s/div"
 
 def command_thread():
     global v_threshold, sample_freq, t_scale
@@ -93,7 +105,7 @@ while True:
             
         # Выводим весь график разом
         sys.stdout.write("\n".join(frame) + "\n")
-        sys.stdout.write(f"Trigger Threshold(t): {v_threshold} | Sampling freq(f): {sample_freq} | Time scale(s): {t_scale} | Trigger {"off" if tr_state==0 else "on"}")
+        sys.stdout.write(f"Trigger Threshold(t): {v_threshold} | Sampling freq(f): {sample_freq} | Time scale(s): {t_scale} | Trigger(m) {"off" if tr_state==0 else "on"} | {get_time_div()}                         ")
         
         # \033[u - ВОССТАНОВИТЬ курсор обратно в Command>
         sys.stdout.write("\033[u")
