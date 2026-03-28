@@ -17,8 +17,8 @@
 
 #define PORT 8080
 #define UDP_PORT       8080
-#define FRAME_SIZE     1024            // Количество точек в одном кадре
-#define READ_LEN       4096           // Размер сырого буфера для поиска триггера
+#define FRAME_SIZE     128            // Количество точек в одном кадре
+#define READ_LEN       8192           // Размер сырого буфера для поиска триггера
 
 int g_threshold = 2000;
 int g_thresh_low = 1800;
@@ -123,13 +123,14 @@ void udp_scope_task(void *pvParameters)
     // Буферы
     uint8_t *raw_buf = malloc(READ_LEN);
     uint16_t *frame_to_send = malloc(FRAME_SIZE * sizeof(uint16_t));
+#define DECIMATED_SIZE READ_LEN/2 // Буфер для поиска триггера
+	uint16_t decimated_buf[DECIMATED_SIZE];
+	uint16_t* send_ptr; // Указатель на то, что будем отправлять
     
     ESP_LOGI(TAG, "UDP Scope started. Sending to %s:%d", PC_IP, UDP_PORT);
 
 
-	ESP_ERROR_CHECK(esp_task_wdt_add(NULL)); 
     while (1) {
-		esp_task_wdt_reset(); // Сбрасываем ватчдог вручную каждую итерацию		
         if (need_reconfig) {
             xSemaphoreTake(adc_mutex, portMAX_DELAY);
             adc_continuous_stop(adc_handle);
@@ -142,7 +143,6 @@ void udp_scope_task(void *pvParameters)
         }
 		
 
-
         // Читаем данные из АЦП (DMA)
 		uint32_t ret_num = 0;
         if (xSemaphoreTake(adc_mutex, 0) == pdTRUE) {
@@ -153,38 +153,38 @@ void udp_scope_task(void *pvParameters)
 				adc_digi_output_data_t *p = (adc_digi_output_data_t *)raw_buf;
 				int count = ret_num / SOC_ADC_DIGI_RESULT_BYTES;
 
-				bool ready_to_trigger = false;
 				int start_idx = -1;
-
-				// Поиск триггера с гистерезисом
-				for (int i = 0; i < count - FRAME_SIZE; i++) {
-					uint16_t val = p[i].type1.data & 0xFFF;
-
-					if (!ready_to_trigger && val < g_thresh_low) {
-						ready_to_trigger = true;
+				bool ready = false;
+				if (g_scale > 1) {
+					// --- МЕДЛЕННЫЙ РЕЖИМ (Децимация) ---
+					int d_count = 0;
+					for (int i = 0; i < count && d_count < FRAME_SIZE * 2; i += g_scale) {
+						decimated_buf[d_count++] = p[i].type1.data & 0xFFF;
 					}
-
-					if (ready_to_trigger && val > g_thresh_high) {
-						start_idx = i;
-						break;
+					
+					// Поиск триггера по децимированным данным
+					for (int i = 0; i < d_count - FRAME_SIZE; i++) {
+						if (!ready && decimated_buf[i] < g_thresh_low) ready = true;
+						if (ready && decimated_buf[i] > g_thresh_high) { start_idx = i; break; }
+					}
+					send_ptr = &decimated_buf[start_idx];
+				} 
+				else {
+					// --- БЫСТРЫЙ РЕЖИМ (Прямой поиск) ---
+					for (int i = 0; i < count - FRAME_SIZE; i++) {
+						uint16_t val = p[i].type1.data & 0xFFF;
+						if (!ready && val < g_thresh_low) ready = true;
+						if (ready && val > g_thresh_high) { start_idx = i; break; }
+					}
+					// Формируем кадр напрямую из p (нужно скопировать в frame_to_send, т.к. p - структура)
+					if (start_idx != -1) {
+						for(int j=0; j<FRAME_SIZE; j++) frame_to_send[j] = p[start_idx+j].type1.data & 0xFFF;
+						send_ptr = frame_to_send;
 					}
 				}
 
-				// Отправка кадра, если триггер сработал
 				if (start_idx != -1) {
-					for (int j = 0; j < FRAME_SIZE; j++) {
-						// Берем точки с шагом g_scale
-						int idx = start_idx + (j * g_scale);
-						// Проверка, чтобы не выйти за пределы прочитанного буфера DMA
-						if (idx < count) {
-							frame_to_send[j] = p[idx].type1.data & 0xFFF;
-						} else {
-							frame_to_send[j] = 0; // Заполняем нулями, если данных не хватило
-						}
-					}
-					sendto(sock, frame_to_send, FRAME_SIZE * sizeof(uint16_t), 0, 
-						   (struct sockaddr *)&dest_addr, sizeof(dest_addr));
-
+					sendto(sock, send_ptr, FRAME_SIZE * 2, 0, (struct sockaddr *)&dest_addr, sizeof(dest_addr));
 					vTaskDelay(pdMS_TO_TICKS(100)); 
 				}
 				else 
@@ -193,12 +193,11 @@ void udp_scope_task(void *pvParameters)
             xSemaphoreGive(adc_mutex);
 		}
         // Небольшая пауза, чтобы не блокировать процессор полностью
+		vTaskDelay(pdMS_TO_TICKS(1)); 
     }
 
     free(raw_buf);
     free(frame_to_send);
-    esp_task_wdt_delete(NULL);
-    vTaskDelete(NULL);	
 }
 
 void app_main(void) 
@@ -252,7 +251,7 @@ void app_main(void)
 
 	
 	//xTaskCreate(udp_scope_task, "udp_scope_task", 4096, (void*)handle, 5, NULL);
-	xTaskCreatePinnedToCore(udp_scope_task, "udp_scope", 4096, (void*)handle, 
+	xTaskCreatePinnedToCore(udp_scope_task, "udp_scope", 50000, (void*)handle, 
                         10,  // Высокий приоритет
                         NULL, 
                         1); // Ядро 1
