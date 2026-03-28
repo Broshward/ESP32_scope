@@ -13,39 +13,35 @@ UDP_PORT = 8080
 WIDTH = 120
 HEIGHT = 30
 
-# Функция для чтения клавиши без Enter
-def getch():
-    fd = sys.stdin.fileno()
-    old_settings = termios.tcgetattr(fd)
-    try:
-        tty.setraw(sys.stdin.fileno())
-        ch = sys.stdin.read(1)
-    finally:
-        termios.tcsetattr(fd, termios.TCSADRAIN, old_settings)
-    return ch
-
-def keyboard_listener():
-    global threshold
-    print("Управление: W - порог выше, S - порог ниже")
+def command_thread():
+    global threshold, scale
     while True:
-        key = sys.stdin.read(1) # Нужно нажимать Enter или использовать библиотеку 'getch'
-        if key == 'w':
-            threshold = min(threshold + 100, 4000)
-            sock.sendto(f"T{threshold}".encode(), (ESP32_IP, UDP_PORT))
-        elif key == 's':
-            threshold = max(threshold - 100, 100)
-            sock.sendto(f"T{threshold}".encode(), (ESP32_IP, UDP_PORT))
-        elif key == 'q':
-            sys.exit(0)
+        # Ждем ввода команды, например: t 2500 или s 10
+        cmd = input("Command> ") 
+        try:
+            parts = cmd.split()
+            if parts[0] == 't': # Порог
+                val = int(parts[1])
+                threshold = val
+                sock.sendto(f"T{val}".encode(), (ESP32_IP, UDP_PORT))
+            elif parts[0] == 's': # Скейл (время развертки)
+                val = int(parts[1])
+                scale = val
+                sock.sendto(f"S{val}".encode(), (ESP32_IP, UDP_PORT))
+            elif parts[0] == 'f': # Sampling frequency
+                val = int(parts[1])
+                sock.sendto(f"F{val}".encode(), (ESP32_IP, UDP_PORT))
+            #elif parts[0] == 'q': # Скейл (время развертки)
+            #    exit(0)
+        except:
+            print("Ошибка команды! Формат: 't 2000' или 's 2'")
 
-# Запускаем поток команд
-threading.Thread(target=keyboard_listener, daemon=True).start()
+threading.Thread(target=command_thread, daemon=True).start()
 
 
 sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
 sock.bind(("", UDP_PORT)) # Слушаем всех на этом порту
 sock.settimeout(0.5)
-
 print("Осциллограф запущен. Жду UDP пакеты...")
 
 while True:

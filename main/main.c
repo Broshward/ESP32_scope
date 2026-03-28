@@ -16,16 +16,43 @@
 #define PORT 8080
 #define UDP_PORT       8080
 #define FRAME_SIZE     512            // Количество точек в одном кадре
-#define READ_LEN       2048           // Размер сырого буфера для поиска триггера
+#define READ_LEN       4096           // Размер сырого буфера для поиска триггера
 
 int g_threshold = 2000;
 int g_thresh_low = 1800;
 int g_thresh_high = 2200;
+int g_scale = 1; // По умолчанию 1:1 (Масштаб)
 
 
 static const char *TAG = "UDP_SCOPE";
 
-void udp_scope_task(void *pvParameters) {
+void update_adc_freq(adc_continuous_handle_t handle, uint32_t new_freq_hz) 
+{
+    ESP_ERROR_CHECK(adc_continuous_stop(handle));
+
+    adc_continuous_config_t dig_cfg = {
+        .sample_freq_hz = new_freq_hz,
+        .conv_mode = ADC_CONV_SINGLE_UNIT_1,
+        .format = ADC_DIGI_OUTPUT_FORMAT_TYPE1,
+    };
+
+    adc_digi_pattern_config_t adc_pattern = {
+        .atten = ADC_ATTEN_DB_12,
+        .channel = ADC_CHANNEL_6, // Ваш GPIO
+        .unit = ADC_UNIT_1,
+        .bit_width = SOC_ADC_DIGI_MAX_BITWIDTH,
+    };
+    
+    dig_cfg.pattern_num = 1;
+    dig_cfg.adc_pattern = &adc_pattern;
+
+    ESP_ERROR_CHECK(adc_continuous_config(handle, &dig_cfg));
+    ESP_ERROR_CHECK(adc_continuous_start(handle));
+    ESP_LOGI(TAG, "ADC Frequency changed to: %lu Hz", new_freq_hz);
+}
+
+void udp_scope_task(void *pvParameters) 
+{
     adc_continuous_handle_t adc_handle = (adc_continuous_handle_t)pvParameters;
     
     // 1. Настройка UDP сокета
@@ -58,7 +85,7 @@ void udp_scope_task(void *pvParameters) {
     char rx_buffer[16];
     struct sockaddr_in source_addr;
     socklen_t socklen = sizeof(source_addr);
-
+ 
     while (1) {
         // ПРОВЕРКА КОМАНД (неблокирующая)
         int len = recvfrom(sock, rx_buffer, sizeof(rx_buffer) - 1, MSG_DONTWAIT, 
@@ -71,20 +98,27 @@ void udp_scope_task(void *pvParameters) {
                 g_thresh_high = g_threshold + 150;
                 ESP_LOGI(TAG, "New Threshold set: %d", g_threshold);
             }
+			if (rx_buffer[0] == 'S') {
+				g_scale = atoi(&rx_buffer[1]);
+				if (g_scale < 1) g_scale = 1;
+				ESP_LOGI(TAG, "New Scale: %d", g_scale);
+			}
         }
 
+
+        // Читаем данные из АЦП (DMA)
 		uint32_t ret_num = 0;
-        // 2. Читаем данные из АЦП (DMA)
         esp_err_t ret = adc_continuous_read(adc_handle, raw_buf, READ_LEN, &ret_num, 0);
 
         if (ret == ESP_OK && ret_num > 0) {
+			printf("%d\n",(int)ret_num);
             adc_digi_output_data_t *p = (adc_digi_output_data_t *)raw_buf;
             int count = ret_num / SOC_ADC_DIGI_RESULT_BYTES;
 
             bool ready_to_trigger = false;
             int start_idx = -1;
 
-            // 3. Поиск триггера с гистерезисом
+            // Поиск триггера с гистерезисом
             for (int i = 0; i < count - FRAME_SIZE; i++) {
                 uint16_t val = p[i].type1.data & 0xFFF;
 
@@ -98,12 +132,18 @@ void udp_scope_task(void *pvParameters) {
                 }
             }
 
-            // 4. Отправка кадра, если триггер сработал
+            // Отправка кадра, если триггер сработал
             if (start_idx != -1) {
-                for (int j = 0; j < FRAME_SIZE; j++) {
-                    frame_to_send[j] = p[start_idx + j].type1.data & 0xFFF;
-                }
-
+			    for (int j = 0; j < FRAME_SIZE; j++) {
+					// Берем точки с шагом g_scale
+					int idx = start_idx + (j * g_scale);
+					// Проверка, чтобы не выйти за пределы прочитанного буфера DMA
+					if (idx < count) {
+						frame_to_send[j] = p[idx].type1.data & 0xFFF;
+					} else {
+						frame_to_send[j] = 0; // Заполняем нулями, если данных не хватило
+					}
+				}
                 sendto(sock, frame_to_send, FRAME_SIZE * sizeof(uint16_t), 0, 
                        (struct sockaddr *)&dest_addr, sizeof(dest_addr));
 
@@ -150,7 +190,7 @@ void app_main(void)
 
     // 2. Настройка параметров АЦП
     adc_continuous_config_t dig_cfg = {
-        .sample_freq_hz = 100 * 1000, // Для начала 100 кГц, чтобы не завалить лог
+        .sample_freq_hz = 1000 * 1000, // Для начала 100 кГц, чтобы не завалить лог
         .conv_mode = ADC_CONV_SINGLE_UNIT_1,
         .format = ADC_DIGI_OUTPUT_FORMAT_TYPE1,
     };
