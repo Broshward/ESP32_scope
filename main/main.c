@@ -9,6 +9,7 @@
 #include "lwip/sockets.h"
 #include "esp_wifi.h"
 #include "nvs_flash.h"
+#include "freertos/semphr.h"
 
 #include "wifi.h"
 #include "conf.h"
@@ -24,37 +25,38 @@ int g_thresh_high = 2200;
 int g_scale = 1; // По умолчанию 1:1 (Масштаб)
 
 
+// Семафор для защиты АЦП
+SemaphoreHandle_t adc_mutex;
+volatile uint32_t target_freq = 100000;
+volatile bool need_reconfig = false;
+
+
 static const char *TAG = "UDP_SCOPE";
 
-void update_adc_freq(adc_continuous_handle_t handle, uint32_t new_freq_hz) 
+// Функция (пере)конфигурации
+void configure_adc(adc_continuous_handle_t handle, uint32_t freq) 
 {
-    ESP_ERROR_CHECK(adc_continuous_stop(handle));
-
     adc_continuous_config_t dig_cfg = {
-        .sample_freq_hz = new_freq_hz,
+        .sample_freq_hz = freq,
         .conv_mode = ADC_CONV_SINGLE_UNIT_1,
         .format = ADC_DIGI_OUTPUT_FORMAT_TYPE1,
     };
-
-    adc_digi_pattern_config_t adc_pattern = {
-        .atten = ADC_ATTEN_DB_12,
-        .channel = ADC_CHANNEL_6, // Ваш GPIO
-        .unit = ADC_UNIT_1,
-        .bit_width = SOC_ADC_DIGI_MAX_BITWIDTH,
+    adc_digi_pattern_config_t pattern = {
+        .atten = ADC_ATTEN_DB_12, .channel = ADC_CHANNEL_6,
+        .unit = ADC_UNIT_1, .bit_width = SOC_ADC_DIGI_MAX_BITWIDTH,
     };
-    
     dig_cfg.pattern_num = 1;
-    dig_cfg.adc_pattern = &adc_pattern;
-
+    dig_cfg.adc_pattern = &pattern;
+    
     ESP_ERROR_CHECK(adc_continuous_config(handle, &dig_cfg));
-    ESP_ERROR_CHECK(adc_continuous_start(handle));
-    ESP_LOGI(TAG, "ADC Frequency changed to: %lu Hz", new_freq_hz);
 }
 
 void udp_scope_task(void *pvParameters) 
 {
     adc_continuous_handle_t adc_handle = (adc_continuous_handle_t)pvParameters;
-    
+    adc_mutex = xSemaphoreCreateMutex();
+    adc_continuous_start(adc_handle);
+	   
     // 1. Настройка UDP сокета
     struct sockaddr_in dest_addr;
     dest_addr.sin_addr.s_addr = inet_addr(PC_IP);
@@ -87,6 +89,18 @@ void udp_scope_task(void *pvParameters)
     socklen_t socklen = sizeof(source_addr);
  
     while (1) {
+        if (need_reconfig) {
+            xSemaphoreTake(adc_mutex, portMAX_DELAY);
+            adc_continuous_stop(adc_handle);
+            configure_adc(adc_handle, target_freq);
+            adc_continuous_start(adc_handle);
+            need_reconfig = false;
+            xSemaphoreGive(adc_mutex);
+            ESP_LOGI("ADC", "Reconfigured to %lu Hz", target_freq);
+			printf("%d\n",(int)target_freq);
+        }
+		
+
         // ПРОВЕРКА КОМАНД (неблокирующая)
         int len = recvfrom(sock, rx_buffer, sizeof(rx_buffer) - 1, MSG_DONTWAIT, 
                            (struct sockaddr *)&source_addr, &socklen);
@@ -103,56 +117,66 @@ void udp_scope_task(void *pvParameters)
 				if (g_scale < 1) g_scale = 1;
 				ESP_LOGI(TAG, "New Scale: %d", g_scale);
 			}
+			if (rx_buffer[0] == 'F') {
+				uint32_t val = strtoul(&rx_buffer[1], NULL, 10);
+				if (val >= 20000 && val <= 2000000) {
+					target_freq = val;
+					need_reconfig = true;
+				}
+			}
         }
 
 
         // Читаем данные из АЦП (DMA)
 		uint32_t ret_num = 0;
-        esp_err_t ret = adc_continuous_read(adc_handle, raw_buf, READ_LEN, &ret_num, 0);
+        if (xSemaphoreTake(adc_mutex, 0) == pdTRUE) {
+			esp_err_t ret = adc_continuous_read(adc_handle, raw_buf, READ_LEN, &ret_num, 0);
 
-        if (ret == ESP_OK && ret_num > 0) {
-			printf("%d\n",(int)ret_num);
-            adc_digi_output_data_t *p = (adc_digi_output_data_t *)raw_buf;
-            int count = ret_num / SOC_ADC_DIGI_RESULT_BYTES;
+			if (ret == ESP_OK && ret_num > 0) {
+				//printf("%d\n",(int)ret_num);
+				adc_digi_output_data_t *p = (adc_digi_output_data_t *)raw_buf;
+				int count = ret_num / SOC_ADC_DIGI_RESULT_BYTES;
 
-            bool ready_to_trigger = false;
-            int start_idx = -1;
+				bool ready_to_trigger = false;
+				int start_idx = -1;
 
-            // Поиск триггера с гистерезисом
-            for (int i = 0; i < count - FRAME_SIZE; i++) {
-                uint16_t val = p[i].type1.data & 0xFFF;
+				// Поиск триггера с гистерезисом
+				for (int i = 0; i < count - FRAME_SIZE; i++) {
+					uint16_t val = p[i].type1.data & 0xFFF;
 
-                if (!ready_to_trigger && val < g_thresh_low) {
-                    ready_to_trigger = true;
-                }
+					if (!ready_to_trigger && val < g_thresh_low) {
+						ready_to_trigger = true;
+					}
 
-                if (ready_to_trigger && val > g_thresh_high) {
-                    start_idx = i;
-                    break;
-                }
-            }
-
-            // Отправка кадра, если триггер сработал
-            if (start_idx != -1) {
-			    for (int j = 0; j < FRAME_SIZE; j++) {
-					// Берем точки с шагом g_scale
-					int idx = start_idx + (j * g_scale);
-					// Проверка, чтобы не выйти за пределы прочитанного буфера DMA
-					if (idx < count) {
-						frame_to_send[j] = p[idx].type1.data & 0xFFF;
-					} else {
-						frame_to_send[j] = 0; // Заполняем нулями, если данных не хватило
+					if (ready_to_trigger && val > g_thresh_high) {
+						start_idx = i;
+						break;
 					}
 				}
-                sendto(sock, frame_to_send, FRAME_SIZE * sizeof(uint16_t), 0, 
-                       (struct sockaddr *)&dest_addr, sizeof(dest_addr));
 
-                // 5. Ограничение FPS (25-30 кадров в секунду)
-                vTaskDelay(pdMS_TO_TICKS(40)); 
-            }
-        }
+				// Отправка кадра, если триггер сработал
+				if (start_idx != -1) {
+					for (int j = 0; j < FRAME_SIZE; j++) {
+						// Берем точки с шагом g_scale
+						int idx = start_idx + (j * g_scale);
+						// Проверка, чтобы не выйти за пределы прочитанного буфера DMA
+						if (idx < count) {
+							frame_to_send[j] = p[idx].type1.data & 0xFFF;
+						} else {
+							frame_to_send[j] = 0; // Заполняем нулями, если данных не хватило
+						}
+					}
+					sendto(sock, frame_to_send, FRAME_SIZE * sizeof(uint16_t), 0, 
+						   (struct sockaddr *)&dest_addr, sizeof(dest_addr));
+
+					// 5. Ограничение FPS (25-30 кадров в секунду)
+					vTaskDelay(pdMS_TO_TICKS(40)); 
+				}
+			}
+            xSemaphoreGive(adc_mutex);
+		}
         // Небольшая пауза, чтобы не блокировать процессор полностью
-        vTaskDelay(pdMS_TO_TICKS(1)); 
+        vTaskDelay(pdMS_TO_TICKS(10)); 
     }
 
     free(raw_buf);
@@ -206,7 +230,7 @@ void app_main(void)
     dig_cfg.adc_pattern = &adc_pattern;
 
     ESP_ERROR_CHECK(adc_continuous_config(handle, &dig_cfg));
-    ESP_ERROR_CHECK(adc_continuous_start(handle));
+    //ESP_ERROR_CHECK(adc_continuous_start(handle));
 
 	
 	xTaskCreate(udp_scope_task, "udp_scope_task", 4096, (void*)handle, 5, NULL);
