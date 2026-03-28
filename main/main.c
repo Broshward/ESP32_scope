@@ -24,6 +24,7 @@ int g_threshold = 2000;
 int g_thresh_low = 1800;
 int g_thresh_high = 2200;
 int g_scale = 1; // По умолчанию 1:1 (Масштаб)
+bool g_trigger_enabled = true; // Глобальный флаг
 
 
 // Семафор для защиты АЦП
@@ -95,6 +96,10 @@ void feedback_command_task(void *pvParameters)
 					need_reconfig = true;
 				}
 			}
+			if (rx_buffer[0] == 'M') { // Команда "m 0" или "m 1"
+				g_trigger_enabled = atoi(&rx_buffer[1]);
+				ESP_LOGI(TAG, "Trigger Mode: %s", g_trigger_enabled ? "ON" : "OFF");
+			}
         }
 		vTaskDelay(pdMS_TO_TICKS(1000));
 	}
@@ -163,19 +168,26 @@ void udp_scope_task(void *pvParameters)
 					}
 					
 					// Поиск триггера по децимированным данным
-					for (int i = 0; i < d_count - FRAME_SIZE; i++) {
-						if (!ready && decimated_buf[i] < g_thresh_low) ready = true;
-						if (ready && decimated_buf[i] > g_thresh_high) { start_idx = i; break; }
-					}
+					if (g_trigger_enabled)
+						for (int i = 0; i < d_count - FRAME_SIZE; i++) {
+							if (!ready && decimated_buf[i] < g_thresh_low) ready = true;
+							if (ready && decimated_buf[i] > g_thresh_high) { start_idx = i; break; }
+						}
+					else
+						start_idx = 0;
 					send_ptr = &decimated_buf[start_idx];
 				} 
 				else {
 					// --- БЫСТРЫЙ РЕЖИМ (Прямой поиск) ---
-					for (int i = 0; i < count - FRAME_SIZE; i++) {
-						uint16_t val = p[i].type1.data & 0xFFF;
-						if (!ready && val < g_thresh_low) ready = true;
-						if (ready && val > g_thresh_high) { start_idx = i; break; }
-					}
+					if (g_trigger_enabled)
+						for (int i = 0; i < count - FRAME_SIZE; i++) {
+							uint16_t val = p[i].type1.data & 0xFFF;
+							if (!ready && val < g_thresh_low) ready = true;
+							if (ready && val > g_thresh_high) { start_idx = i; break; }
+						}
+					else
+						start_idx = 0;
+
 					// Формируем кадр напрямую из p (нужно скопировать в frame_to_send, т.к. p - структура)
 					if (start_idx != -1) {
 						for(int j=0; j<FRAME_SIZE; j++) frame_to_send[j] = p[start_idx+j].type1.data & 0xFFF;

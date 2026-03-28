@@ -15,6 +15,7 @@ HEIGHT = 30
 v_threshold = 2000
 sample_freq = 2000000
 t_scale = 1
+tr_state = 1
 
 def command_thread():
     global v_threshold, sample_freq, t_scale
@@ -44,6 +45,10 @@ def command_thread():
                 val = int(parts[1])
                 sample_freq = val
                 sock.sendto(f"F{val}".encode(), (ESP32_IP, UDP_PORT))
+            elif parts[0] == 'm': # Sampling frequency
+                val = int(parts[1])
+                tr_state = val
+                sock.sendto(f"M{val}".encode(), (ESP32_IP, UDP_PORT))
             #elif parts[0] == 'q': # Скейл (время развертки)
             #    exit(0)
         except Exception as e:
@@ -78,7 +83,8 @@ while True:
             level = y * (4096 // HEIGHT)
             next_level = (y + 1) * (4096 // HEIGHT)
             for x, val in enumerate(view):
-                is_signal = level <= val < next_level
+                is_clipping = (val < 16) or (val > 4080)
+                is_signal = level <= val < next_level  and not is_clipping
                 is_grid = (x % 10 == 0) or (y % 4 == 0)
                 if is_signal: line += "█"
                 elif is_grid: line += "·"
@@ -87,7 +93,7 @@ while True:
             
         # Выводим весь график разом
         sys.stdout.write("\n".join(frame) + "\n")
-        sys.stdout.write(f"Trigger Threshold(t): {v_threshold} | Sampling freq(f): {sample_freq} | Time scale(s): {t_scale}")
+        sys.stdout.write(f"Trigger Threshold(t): {v_threshold} | Sampling freq(f): {sample_freq} | Time scale(s): {t_scale} | Trigger {"off" if tr_state==0 else "on"}")
         
         # \033[u - ВОССТАНОВИТЬ курсор обратно в Command>
         sys.stdout.write("\033[u")
