@@ -26,7 +26,7 @@ int g_thresh_high = 2200;
 int g_scale = 1; // По умолчанию 1:1 (Масштаб времени)
 bool g_trigger_enabled = false; // Trigger off
 float g_gain = 1.0; // Коэффициент усиления (1.0 = без изменений)
-
+int target_atten = ADC_ATTEN_DB_12; // Уровень аттенюации АЦП (hardware)
 
 
 // Семафор для защиты АЦП
@@ -38,7 +38,7 @@ volatile bool need_reconfig = false;
 static const char *TAG = "UDP_SCOPE";
 
 // Функция (пере)конфигурации
-void configure_adc(adc_continuous_handle_t handle, uint32_t freq) 
+void configure_adc(adc_continuous_handle_t handle, uint32_t freq, adc_atten_t atten) 
 {
     adc_continuous_config_t dig_cfg = {
         .sample_freq_hz = freq,
@@ -46,7 +46,7 @@ void configure_adc(adc_continuous_handle_t handle, uint32_t freq)
         .format = ADC_DIGI_OUTPUT_FORMAT_TYPE1,
     };
     adc_digi_pattern_config_t pattern = {
-        .atten = ADC_ATTEN_DB_12, .channel = ADC_CHANNEL_6,
+        .atten = atten, .channel = ADC_CHANNEL_6,
         .unit = ADC_UNIT_1, .bit_width = SOC_ADC_DIGI_MAX_BITWIDTH,
     };
     dig_cfg.pattern_num = 1;
@@ -105,6 +105,15 @@ void feedback_command_task(void *pvParameters)
 			if (rx_buffer[0] == 'G') {    // Команда "g 2.5"
 				g_gain = atof(&rx_buffer[1]);
 			}
+			// В задаче управления ESP32:
+			if (rx_buffer[0] == 'A') { // Команда "a 0", "a 1", "a 2", "a 3"
+				int val = atoi(&rx_buffer[1]);
+				adc_atten_t levels[] = {ADC_ATTEN_DB_0, ADC_ATTEN_DB_2_5, ADC_ATTEN_DB_6, ADC_ATTEN_DB_12};
+				if (val >= 0 && val <= 3) {
+					target_atten = levels[val];
+					need_reconfig = true; // Сигнализируем основной задаче
+				}
+			}
 
         }
 		vTaskDelay(pdMS_TO_TICKS(1000));
@@ -146,7 +155,7 @@ void udp_scope_task(void *pvParameters)
         if (need_reconfig) {
             xSemaphoreTake(adc_mutex, portMAX_DELAY);
             adc_continuous_stop(adc_handle);
-            configure_adc(adc_handle, target_freq);
+            configure_adc(adc_handle, target_freq, target_atten);
             adc_continuous_start(adc_handle);
             need_reconfig = false;
             xSemaphoreGive(adc_mutex);
@@ -167,8 +176,8 @@ void udp_scope_task(void *pvParameters)
 				// Программное усиление (масштабирование)
 				for (int i = 0; i < count; i++) {
 				    uint16_t raw_val = p[i].type1.data & 0xFFF;
-				    int32_t centered = (int32_t)raw_val - g_threshold;
-				    int32_t scaled = (int32_t)(centered * g_gain) + g_threshold;
+				    int32_t centered = (int32_t)raw_val - g_threshold;	// - 2048;
+				    int32_t scaled = (int32_t)(centered * g_gain) + g_threshold; // + 2048;
 				
 				    // Ограничиваем (clipping), чтобы не вылезти за 0-4095
 				    if (scaled > 4095) scaled = 4095;

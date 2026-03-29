@@ -18,6 +18,27 @@ t_scale = 1             # Time scale
 tr_state = 0            # Trigger state (on/off)
 is_hold = 0             # Hold screen
 v_gain = 1              # Voltage gain (Vertical scale)
+current_atten = 3       # Аттенюатор АЦП (3 - 3.3V max)
+
+ATTEN_MAP = {
+    0: 1.1,  # ADC_ATTEN_DB_0
+    1: 1.5,  # ADC_ATTEN_DB_2_5
+    2: 2.2,  # ADC_ATTEN_DB_6
+    3: 3.3   # ADC_ATTEN_DB_12
+}
+
+def get_voltage_stats(view, atten_idx):
+    max_v_range = ATTEN_MAP.get(atten_idx, 3.3)
+    
+    # Пересчитываем массив "попугаев" (0-4095) в Вольты
+    voltages = view * (max_v_range / 4095.0)
+    
+    v_min = np.min(voltages)
+    v_max = np.max(voltages)
+    v_pp = v_max - v_min # Peak-to-Peak (размах)
+    v_avg = np.mean(voltages) # Среднее (DC составляющая)
+    
+    return v_min, v_max, v_pp, v_avg
 
 
 def calculate_frequency(view, fs, scale):
@@ -49,7 +70,7 @@ def get_time_div():
         return f"{time_per_div:.2f} s/div"
 
 def command_thread():
-    global v_threshold, sample_freq, t_scale, tr_state, is_hold, v_gain
+    global v_threshold, sample_freq, t_scale, tr_state, is_hold, v_gain, current_atten
     # Печатаем приглашение один раз в самом низу
     sys.stdout.write(f"\033[{HEIGHT+4};1H\033[KCommand> ")
     #sys.stdout.flush()
@@ -83,12 +104,14 @@ def command_thread():
             elif parts[0] == 'h':
                 is_hold = not is_hold
             elif parts[0] == 'g': # Signal gain
-                val = int(parts[1])
+                val = float(parts[1])
                 v_gain = val
                 sock.sendto(f"G{val}".encode(), (ESP32_IP, UDP_PORT))
-            
-                
-            #elif parts[0] == 'q': # Скейл (время развертки)
+            elif parts[0] == 'a':
+                val = int(parts[1]) # 0 (1.1V), 1 (1.5V), 2 (2.2V), 3 (3.3V)
+                current_atten = val
+                sock.sendto(f"A{val}".encode(), (ESP32_IP, UDP_PORT))
+            #elif parts[0] == 'q': 
             #    exit(0)
         except Exception as e:
             # Выводим ошибку на 29-ю строку, чтобы не ломать график
@@ -122,6 +145,9 @@ while True:
             freq_str = f"{freq:.1f} Hz"
         status = "HOLD ON" if is_hold else "RUNNING"
         
+        # Voltage calc
+        v_min, v_max, v_pp, v_avg = get_voltage_stats(view, current_atten)
+
         # \033[s - СОХРАНИТЬ позицию курсора (где пользователь пишет команду)
         # \033[H - Прыгнуть в начало для графика
         sys.stdout.write("\033[s\033[H")
@@ -143,7 +169,9 @@ while True:
             
         # Выводим весь график разом
         sys.stdout.write("\n".join(frame) + "\n")
-        sys.stdout.write(f"Trigger Threshold(t): {v_threshold} | Sampling freq(f): {sample_freq} | Time scale(s): {t_scale} | Trigger(m) {"off" if tr_state==0 else "on"} | {get_time_div()} | {freq_str} | {status}      ")
+        sys.stdout.write(f"Trigger Threshold(t): {v_threshold} | Sampling freq(f): {sample_freq} | Time scale(s): {t_scale} | Trigger(m) {"off" if tr_state==0 else "on"} | {get_time_div()} | {freq_str} | {status}      \n")
+        sys.stdout.write(f"Vpp: {v_pp:.3f}V | Vmin: {v_min:.3f} | Vmax: {v_max:.3f}V | Vavg: {v_avg:.3f}V")
+        
         
         # \033[u - ВОССТАНОВИТЬ курсор обратно в Command>
         sys.stdout.write("\033[u")
