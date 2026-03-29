@@ -15,7 +15,25 @@ HEIGHT = 30
 v_threshold = 2000      # Vertical threshold(voltage threshold)
 sample_freq = 2000000   # Sample frequency
 t_scale = 1             # Time scale
-tr_state = 1            # Trigger state (on/off)
+tr_state = 0            # Trigger state (on/off)
+is_hold = 0             # Hold screen
+
+
+def calculate_frequency(view, fs, scale):
+    # Находим все индексы, где сигнал пересекает порог (v_threshold) вверх
+    # (data < v_threshold) дает массив True/False, np.diff находит смену состояния
+    crossings = np.where((view[:-1] < v_threshold) & (view[1:] >= v_threshold))[0]
+    
+    if len(crossings) >= 2:
+        # Расстояние между двумя соседними пересечениями (период в точках)
+        # Берем среднее между всеми найденными периодами для точности
+        period_samples = np.mean(np.diff(crossings))
+        
+        # Реальная частота с учетом децимации (scale)
+        if period_samples > 0:
+            freq = fs / (period_samples * scale) / 1000 
+            return freq
+    return 0
 
 def get_time_div():
     # Время одного деления в секундах
@@ -30,16 +48,16 @@ def get_time_div():
         return f"{time_per_div:.2f} s/div"
 
 def command_thread():
-    global v_threshold, sample_freq, t_scale
+    global v_threshold, sample_freq, t_scale, tr_state, is_hold
     # Печатаем приглашение один раз в самом низу
-    sys.stdout.write("\033[%d;1H\033[KCommand> " %(HEIGHT+3))
-    sys.stdout.flush()
+    sys.stdout.write(f"\033[{HEIGHT+4};1H\033[KCommand> ")
+    #sys.stdout.flush()
     
     while True:
         # Пустой input не перебивает наши координаты курсора
         cmd = sys.stdin.readline().strip() 
         if not cmd:
-            sys.stdout.write("\033[%d;1H\033[KCommand> " %(HEIGHT+3))
+            sys.stdout.write("\033[%d;1H\033[KCommand> " %(HEIGHT+4))
             sys.stdout.flush()
             continue
             
@@ -61,6 +79,9 @@ def command_thread():
                 val = int(parts[1])
                 tr_state = val
                 sock.sendto(f"M{val}".encode(), (ESP32_IP, UDP_PORT))
+            elif parts[0] == 'h':
+                is_hold = not is_hold
+                
             #elif parts[0] == 'q': # Скейл (время развертки)
             #    exit(0)
         except Exception as e:
@@ -68,7 +89,7 @@ def command_thread():
             sys.stdout.write(f"\033[%d;1H\033[KError: {e}" %(HEIGHT+2))
             
         # Очищаем строку ввода для следующей команды
-        sys.stdout.write("\033[%d;1H\033[KCommand> " %(HEIGHT+3))
+        sys.stdout.write("\033[%d;1H\033[KCommand> " %(HEIGHT+4))
         sys.stdout.flush()
 
 threading.Thread(target=command_thread, daemon=True).start()
@@ -77,12 +98,23 @@ threading.Thread(target=command_thread, daemon=True).start()
 sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
 sock.bind(("", UDP_PORT)) # Слушаем всех на этом порту
 sock.settimeout(0.5)
-print("Осциллограф запущен. Жду UDP пакеты...")
+#print("Осциллограф запущен. Жду UDP пакеты...")
 
 while True:
     try:
         data_raw, addr = sock.recvfrom(2048)
         view = np.frombuffer(data_raw, dtype=np.uint16)[:WIDTH]
+
+        if is_hold:
+            continue # Просто игнорируем новые данные, старый график остается на экране
+        
+        # Frequency calc
+        freq = calculate_frequency(view, sample_freq, t_scale)
+        if freq > 1000:
+            freq_str = f"{freq/1000:.2f} kHz"
+        else:
+            freq_str = f"{freq:.1f} Hz"
+        status = "HOLD ON" if is_hold else "RUNNING"
         
         # \033[s - СОХРАНИТЬ позицию курсора (где пользователь пишет команду)
         # \033[H - Прыгнуть в начало для графика
@@ -105,7 +137,7 @@ while True:
             
         # Выводим весь график разом
         sys.stdout.write("\n".join(frame) + "\n")
-        sys.stdout.write(f"Trigger Threshold(t): {v_threshold} | Sampling freq(f): {sample_freq} | Time scale(s): {t_scale} | Trigger(m) {"off" if tr_state==0 else "on"} | {get_time_div()}                         ")
+        sys.stdout.write(f"Trigger Threshold(t): {v_threshold} | Sampling freq(f): {sample_freq} | Time scale(s): {t_scale} | Trigger(m) {"off" if tr_state==0 else "on"} | {get_time_div()} | {freq_str} | {status}      ")
         
         # \033[u - ВОССТАНОВИТЬ курсор обратно в Command>
         sys.stdout.write("\033[u")
