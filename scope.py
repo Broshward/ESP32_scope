@@ -31,15 +31,27 @@ def get_voltage_stats(view, atten_idx):
     max_v_range = ATTEN_MAP.get(atten_idx, 3.3)
     
     # Пересчитываем массив "попугаев" (0-4095) в Вольты
-    voltages = view * (max_v_range / 4095.0)
+    voltages = view * (max_v_range / 4095.0) / v_gain
     
     v_min = np.min(voltages)
     v_max = np.max(voltages)
     v_pp = v_max - v_min # Peak-to-Peak (размах)
     v_avg = np.mean(voltages) # Среднее (DC составляющая)
-    
-    return v_min, v_max, v_pp, v_avg
 
+    #RMS
+    # Вычитаем постоянную составляющую (DC), чтобы мерить только AC RMS
+    ac_component = voltages - v_avg
+    rms = np.sqrt(np.mean(ac_component**2))
+    
+    return v_min, v_max, v_pp, v_avg, rms
+
+def get_v_div(atten_idx, height):
+    max_v = ATTEN_MAP.get(atten_idx, 3.3)
+    v_per_div = (max_v / height) * 4 / v_gain
+    
+    if v_per_div < 0.1:
+        return f"{v_per_div * 1000:.1f} mV/div"
+    return f"{v_per_div:.2f} V/div"
 
 def calculate_frequency(view, fs, scale):
     # Находим все индексы, где сигнал пересекает порог (v_threshold) вверх
@@ -146,7 +158,9 @@ while True:
         status = "HOLD ON" if is_hold else "RUNNING"
         
         # Voltage calc
-        v_min, v_max, v_pp, v_avg = get_voltage_stats(view, current_atten)
+        v_min, v_max, v_pp, v_avg, v_rms = get_voltage_stats(view, current_atten)
+        v_div_str = get_v_div(current_atten, HEIGHT)
+
 
         # \033[s - СОХРАНИТЬ позицию курсора (где пользователь пишет команду)
         # \033[H - Прыгнуть в начало для графика
@@ -170,7 +184,7 @@ while True:
         # Выводим весь график разом
         sys.stdout.write("\n".join(frame) + "\n")
         sys.stdout.write(f"Trigger Threshold(t): {v_threshold} | Sampling freq(f): {sample_freq} | Time scale(s): {t_scale} | Trigger(m) {"off" if tr_state==0 else "on"} | {get_time_div()} | {freq_str} | {status}      \n")
-        sys.stdout.write(f"Vpp: {v_pp:.3f}V | Vmin: {v_min:.3f} | Vmax: {v_max:.3f}V | Vavg: {v_avg:.3f}V")
+        sys.stdout.write(f"Vpp: {v_pp:.3f}V | Vmin: {v_min:.3f} | Vmax: {v_max:.3f}V | Vavg: {v_avg:.3f}V | Vrms: {v_rms:.3f}V | {v_div_str}")
         
         
         # \033[u - ВОССТАНОВИТЬ курсор обратно в Command>
