@@ -27,6 +27,7 @@ int g_scale = 1; // По умолчанию 1:1 (Масштаб времени)
 bool g_trigger_enabled = false; // Trigger off
 float g_gain = 1.0; // Коэффициент усиления (1.0 = без изменений)
 int target_atten = ADC_ATTEN_DB_12; // Уровень аттенюации АЦП (hardware)
+int32_t g_offset = 0; // Смещение в "попугаях" АЦП (от -2048 до 2048)
 
 
 // Семафор для защиты АЦП
@@ -114,7 +115,9 @@ void feedback_command_task(void *pvParameters)
 					need_reconfig = true; // Сигнализируем основной задаче
 				}
 			}
-
+			if (rx_buffer[0] == 'o') { // Команда "o -500"
+				g_offset = atoi(&rx_buffer[1]);
+			}			
         }
 		vTaskDelay(pdMS_TO_TICKS(1000));
 	}
@@ -177,7 +180,7 @@ void udp_scope_task(void *pvParameters)
 				for (int i = 0; i < count; i++) {
 				    uint16_t raw_val = p[i].type1.data & 0xFFF;
 				    int32_t centered = (int32_t)raw_val - g_threshold;	// - 2048;
-				    int32_t scaled = (int32_t)(centered * g_gain) + g_threshold; // + 2048;
+				    int32_t scaled = (int32_t)(centered * g_gain) + g_threshold + g_offset; // + 2048;
 				
 				    // Ограничиваем (clipping), чтобы не вылезти за 0-4095
 				    if (scaled > 4095) scaled = 4095;

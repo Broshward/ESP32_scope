@@ -19,6 +19,7 @@ tr_state = 0            # Trigger state (on/off)
 is_hold = 0             # Hold screen
 v_gain = 1              # Voltage gain (Vertical scale)
 current_atten = 3       # Аттенюатор АЦП (3 - 3.3V max)
+current_offset = 0
 
 ATTEN_MAP = {
     0: 1.1,  # ADC_ATTEN_DB_0
@@ -31,6 +32,10 @@ def get_voltage_stats(view, atten_idx):
     max_v_range = ATTEN_MAP.get(atten_idx, 3.3)
     
     # Пересчитываем массив "попугаев" (0-4095) в Вольты
+    # Сначала убираем смещение и возвращаем масштаб, потом переводим в вольты
+    raw_corrected = ((view - current_offset - v_threshold ) / v_gain) + v_threshold
+    voltages = raw_corrected * (max_v_range / 4095.0) / v_gain
+    
     voltages = view * (max_v_range / 4095.0) / v_gain
     
     v_min = np.min(voltages)
@@ -82,7 +87,7 @@ def get_time_div():
         return f"{time_per_div:.2f} s/div"
 
 def command_thread():
-    global v_threshold, sample_freq, t_scale, tr_state, is_hold, v_gain, current_atten
+    global v_threshold, sample_freq, t_scale, tr_state, is_hold, v_gain, current_atten, current_offset
     # Печатаем приглашение один раз в самом низу
     sys.stdout.write(f"\033[{HEIGHT+4};1H\033[KCommand> ")
     #sys.stdout.flush()
@@ -123,6 +128,10 @@ def command_thread():
                 val = int(parts[1]) # 0 (1.1V), 1 (1.5V), 2 (2.2V), 3 (3.3V)
                 current_atten = val
                 sock.sendto(f"A{val}".encode(), (ESP32_IP, UDP_PORT))
+            elif parts[0] == 'o': # Signal gain
+                val = int(parts[1])
+                current_offset = val
+                sock.sendto(f"o{val}".encode(), (ESP32_IP, UDP_PORT))
             #elif parts[0] == 'q': 
             #    exit(0)
         except Exception as e:
@@ -184,7 +193,7 @@ while True:
         # Выводим весь график разом
         sys.stdout.write("\n".join(frame) + "\n")
         sys.stdout.write(f"Trigger Threshold(t): {v_threshold} | Sampling freq(f): {sample_freq} | Time scale(s): {t_scale} | Trigger(m) {"off" if tr_state==0 else "on"} | {get_time_div()} | {freq_str} | {status}      \n")
-        sys.stdout.write(f"Vpp: {v_pp:.3f}V | Vmin: {v_min:.3f} | Vmax: {v_max:.3f}V | Vavg: {v_avg:.3f}V | Vrms: {v_rms:.3f}V | {v_div_str}")
+        sys.stdout.write(f"Vpp: {v_pp:.3f}V | Vmin: {v_min:.3f} | Vmax: {v_max:.3f}V | Vavg: {v_avg:.3f}V | Vrms: {v_rms:.3f}V | {v_div_str} | Offset: {current_offset}")
         
         
         # \033[u - ВОССТАНОВИТЬ курсор обратно в Command>
