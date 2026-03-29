@@ -57,12 +57,12 @@ Type commands at the `Command>` prompt and press **Enter**.
 | :--- | :--- | :--- | :--- |
 | **f** | `frequency` | `f 100000` | Set sampling rate (Hz) (20000-2000000) |
 | **t** | `threshold` | `t 2500` | Set trigger level (0-4095) |
-| **e** | `0 or 1` | `e 0` | Trigger edge (1: Rising, 0: Falling) |
+| **e** | `0 or 1` | `e` | Trigger edge toggle (Rising/Falling) |
 | **s** | `value` | `s 10` | Time scale (decimation) (1-30) |
 | **a** | `0-3` | `a 3` | Hardware Attenuation (0:1.1V, 1:1.5V, 2:2.2V, 3:3.3V) |
 | **g** | `float` | `g 2.0` | Software Gain (Vertical zoom) (1.0-) |
 | **o** | `int` | `o -500` | Vertical Offset (Shift trace) |
-| **m** | `none` | `m` | Trigger Mode |
+| **m** | `none` | `m` | Trigger Mode toggle (on/off) |
 | **l** | `none` | `l` | Toggle Dots / Lines mode |
 | **h** | `none` | `h` | Toggle Hold (Freeze frame) |
 
