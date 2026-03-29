@@ -39,7 +39,7 @@ Do not forget select your Wi-Fi network parameters and Height, Width of your ter
     Flash the chip:
 
     <code>
-    idf.py build flash monitor
+    idf.py flash
     </code>
 
 3. Client (Python 3)
