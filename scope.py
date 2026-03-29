@@ -74,7 +74,7 @@ def calculate_frequency(view, fs, scale):
         
         # Реальная частота с учетом децимации (scale)
         if period_samples > 0:
-            freq = fs / (period_samples * scale) / 1000 
+            freq = fs / (period_samples * scale) 
         else:
             freq = 0
     else:

@@ -32,7 +32,6 @@ bool g_edge_rising = true; // true: Rising, false: Falling
 
 
 // Семафор для защиты АЦП
-SemaphoreHandle_t adc_mutex;
 volatile uint32_t target_freq = 100000;
 volatile bool need_reconfig = false;
 
@@ -130,7 +129,6 @@ void feedback_command_task(void *pvParameters)
 void udp_scope_task(void *pvParameters) 
 {
     adc_continuous_handle_t adc_handle = (adc_continuous_handle_t)pvParameters;
-    adc_mutex = xSemaphoreCreateMutex();
     adc_continuous_start(adc_handle);
 	   
     // 1. Настройка UDP сокета
@@ -159,12 +157,10 @@ void udp_scope_task(void *pvParameters)
     while (1) {
 		// Это нужно для изменения параметров конфигурации АЦП
         if (need_reconfig) {
-            xSemaphoreTake(adc_mutex, portMAX_DELAY);
             adc_continuous_stop(adc_handle);
             configure_adc(adc_handle, target_freq, target_atten);
             adc_continuous_start(adc_handle);
             need_reconfig = false;
-            xSemaphoreGive(adc_mutex);
             ESP_LOGI("ADC", "Reconfigured to %lu Hz", target_freq);
 			printf("%d\n",(int)target_freq);
         }
@@ -172,84 +168,81 @@ void udp_scope_task(void *pvParameters)
 
         // Читаем данные из АЦП (DMA)
 		uint32_t ret_num = 0;
-        if (xSemaphoreTake(adc_mutex, 0) == pdTRUE) {
-			esp_err_t ret = adc_continuous_read(adc_handle, raw_buf, READ_LEN, &ret_num, 0);
+		esp_err_t ret = adc_continuous_read(adc_handle, raw_buf, READ_LEN, &ret_num, 0);
 
-			if (ret == ESP_OK && ret_num > 0) {
-				int count = ret_num / SOC_ADC_DIGI_RESULT_BYTES;
-				adc_digi_output_data_t *p = (adc_digi_output_data_t *)raw_buf;
+		if (ret == ESP_OK && ret_num > 0) {
+			int count = ret_num / SOC_ADC_DIGI_RESULT_BYTES;
+			adc_digi_output_data_t *p = (adc_digi_output_data_t *)raw_buf;
 
-				// Программное усиление (масштабирование)
-				for (int i = 0; i < count; i++) {
-				    uint16_t raw_val = p[i].type1.data & 0xFFF;
-				    int32_t centered = (int32_t)raw_val - g_threshold;	// - 2048;
-				    int32_t scaled = (int32_t)(centered * g_gain) + g_threshold + g_offset; // + 2048;
-				
-				    // Ограничиваем (clipping), чтобы не вылезти за 0-4095
-				    if (scaled > 4095) scaled = 4095;
-				    if (scaled < 0) scaled = 0;
-				
-				    p[i].type1.data = (uint16_t)scaled; // Записываем обратно
-				}
-
-
-				int start_idx = -1;
-				bool ready = false;
-				if (g_scale > 1) {
-					// --- МЕДЛЕННЫЙ РЕЖИМ (Децимация) ---
-					int d_count = 0;
-					for (int i = 0; i < count && d_count < FRAME_SIZE * 2; i += g_scale) {
-						decimated_buf[d_count++] = p[i].type1.data & 0xFFF;
-					}
-					
-					// Поиск триггера по децимированным данным
-					if (g_trigger_enabled)
-						for (int i = 0; i < d_count - FRAME_SIZE; i++) {
-							if (g_edge_rising) {
-								if (!ready && decimated_buf[i] < g_thresh_low) ready = true;
-								if (ready && decimated_buf[i] > g_thresh_high) { start_idx = i; break; }
-							}
-							else {
-								if (!ready && decimated_buf[i] > g_thresh_high) ready = true;
-								if (ready && decimated_buf[i] < g_thresh_low) { start_idx = i; break; }
-							}
-						}
-					else
-						start_idx = 0;
-					send_ptr = &decimated_buf[start_idx];
-				} 
-				else {
-					// --- БЫСТРЫЙ РЕЖИМ (Прямой поиск) ---
-					if (g_trigger_enabled)
-						for (int i = 0; i < count - FRAME_SIZE; i++) {
-							uint16_t val = p[i].type1.data & 0xFFF;
-							if (g_edge_rising) {
-								if (!ready && val < g_thresh_low) ready = true;
-								if (ready && val > g_thresh_high) { start_idx = i; break; }
-							}
-							else {
-								if (!ready && val > g_thresh_high) ready = true;
-								if (ready && val < g_thresh_low) { start_idx = i; break; }
-							}
-						}
-					else
-						start_idx = 0;
-
-					// Формируем кадр напрямую из p (нужно скопировать в frame_to_send, т.к. p - структура)
-					if (start_idx != -1) {
-						for(int j=0; j<FRAME_SIZE; j++) frame_to_send[j] = p[start_idx+j].type1.data & 0xFFF;
-						send_ptr = frame_to_send;
-					}
-				}
-
-				if (start_idx != -1) {
-					sendto(sock, send_ptr, FRAME_SIZE * 2, 0, (struct sockaddr *)&dest_addr, sizeof(dest_addr));
-					vTaskDelay(pdMS_TO_TICKS(100)); 
-				}
-				else 
-					vTaskDelay(pdMS_TO_TICKS(1));
+			// Программное усиление (масштабирование)
+			for (int i = 0; i < count; i++) {
+				uint16_t raw_val = p[i].type1.data & 0xFFF;
+				int32_t centered = (int32_t)raw_val - g_threshold;	// - 2048;
+				int32_t scaled = (int32_t)(centered * g_gain) + g_threshold + g_offset; // + 2048;
+			
+				// Ограничиваем (clipping), чтобы не вылезти за 0-4095
+				if (scaled > 4095) scaled = 4095;
+				if (scaled < 0) scaled = 0;
+			
+				p[i].type1.data = (uint16_t)scaled; // Записываем обратно
 			}
-            xSemaphoreGive(adc_mutex);
+
+
+			int start_idx = -1;
+			bool ready = false;
+			if (g_scale > 1) {
+				// --- МЕДЛЕННЫЙ РЕЖИМ (Децимация) ---
+				int d_count = 0;
+				for (int i = 0; i < count && d_count < FRAME_SIZE * 2; i += g_scale) {
+					decimated_buf[d_count++] = p[i].type1.data & 0xFFF;
+				}
+				
+				// Поиск триггера по децимированным данным
+				if (g_trigger_enabled)
+					for (int i = 0; i < d_count - FRAME_SIZE; i++) {
+						if (g_edge_rising) {
+							if (!ready && decimated_buf[i] < g_thresh_low) ready = true;
+							if (ready && decimated_buf[i] > g_thresh_high) { start_idx = i; break; }
+						}
+						else {
+							if (!ready && decimated_buf[i] > g_thresh_high) ready = true;
+							if (ready && decimated_buf[i] < g_thresh_low) { start_idx = i; break; }
+						}
+					}
+				else
+					start_idx = 0;
+				send_ptr = &decimated_buf[start_idx];
+			} 
+			else {
+				// --- БЫСТРЫЙ РЕЖИМ (Прямой поиск) ---
+				if (g_trigger_enabled)
+					for (int i = 0; i < count - FRAME_SIZE; i++) {
+						uint16_t val = p[i].type1.data & 0xFFF;
+						if (g_edge_rising) {
+							if (!ready && val < g_thresh_low) ready = true;
+							if (ready && val > g_thresh_high) { start_idx = i; break; }
+						}
+						else {
+							if (!ready && val > g_thresh_high) ready = true;
+							if (ready && val < g_thresh_low) { start_idx = i; break; }
+						}
+					}
+				else
+					start_idx = 0;
+
+				// Формируем кадр напрямую из p (нужно скопировать в frame_to_send, т.к. p - структура)
+				if (start_idx != -1) {
+					for(int j=0; j<FRAME_SIZE; j++) frame_to_send[j] = p[start_idx+j].type1.data & 0xFFF;
+					send_ptr = frame_to_send;
+				}
+			}
+
+			if (start_idx != -1) {
+				sendto(sock, send_ptr, FRAME_SIZE * 2, 0, (struct sockaddr *)&dest_addr, sizeof(dest_addr));
+				vTaskDelay(pdMS_TO_TICKS(100)); 
+			}
+			else 
+				vTaskDelay(pdMS_TO_TICKS(1));
 		}
         // Небольшая пауза, чтобы не блокировать процессор полностью
 		vTaskDelay(pdMS_TO_TICKS(1)); 
