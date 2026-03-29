@@ -17,6 +17,7 @@ sample_freq = 2000000   # Sample frequency
 t_scale = 1             # Time scale
 tr_state = 0            # Trigger state (on/off)
 is_hold = 0             # Hold screen
+v_gain = 1              # Voltage gain (Vertical scale)
 
 
 def calculate_frequency(view, fs, scale):
@@ -48,7 +49,7 @@ def get_time_div():
         return f"{time_per_div:.2f} s/div"
 
 def command_thread():
-    global v_threshold, sample_freq, t_scale, tr_state, is_hold
+    global v_threshold, sample_freq, t_scale, tr_state, is_hold, v_gain
     # Печатаем приглашение один раз в самом низу
     sys.stdout.write(f"\033[{HEIGHT+4};1H\033[KCommand> ")
     #sys.stdout.flush()
@@ -81,6 +82,11 @@ def command_thread():
                 sock.sendto(f"M{val}".encode(), (ESP32_IP, UDP_PORT))
             elif parts[0] == 'h':
                 is_hold = not is_hold
+            elif parts[0] == 'g': # Signal gain
+                val = int(parts[1])
+                v_gain = val
+                sock.sendto(f"G{val}".encode(), (ESP32_IP, UDP_PORT))
+            
                 
             #elif parts[0] == 'q': # Скейл (время развертки)
             #    exit(0)

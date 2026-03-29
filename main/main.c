@@ -23,8 +23,10 @@
 int g_threshold = 2000;
 int g_thresh_low = 1800;
 int g_thresh_high = 2200;
-int g_scale = 1; // По умолчанию 1:1 (Масштаб)
-bool g_trigger_enabled = true; // Глобальный флаг
+int g_scale = 1; // По умолчанию 1:1 (Масштаб времени)
+bool g_trigger_enabled = false; // Trigger off
+float g_gain = 1.0; // Коэффициент усиления (1.0 = без изменений)
+
 
 
 // Семафор для защиты АЦП
@@ -100,6 +102,10 @@ void feedback_command_task(void *pvParameters)
 				g_trigger_enabled = atoi(&rx_buffer[1]);
 				ESP_LOGI(TAG, "Trigger Mode: %s", g_trigger_enabled ? "ON" : "OFF");
 			}
+			if (rx_buffer[0] == 'G') {    // Команда "g 2.5"
+				g_gain = atof(&rx_buffer[1]);
+			}
+
         }
 		vTaskDelay(pdMS_TO_TICKS(1000));
 	}
@@ -136,6 +142,7 @@ void udp_scope_task(void *pvParameters)
 
 
     while (1) {
+		// Это нужно для изменения параметров конфигурации АЦП
         if (need_reconfig) {
             xSemaphoreTake(adc_mutex, portMAX_DELAY);
             adc_continuous_stop(adc_handle);
@@ -154,9 +161,22 @@ void udp_scope_task(void *pvParameters)
 			esp_err_t ret = adc_continuous_read(adc_handle, raw_buf, READ_LEN, &ret_num, 0);
 
 			if (ret == ESP_OK && ret_num > 0) {
-				//printf("%d\n",(int)ret_num);
-				adc_digi_output_data_t *p = (adc_digi_output_data_t *)raw_buf;
 				int count = ret_num / SOC_ADC_DIGI_RESULT_BYTES;
+				adc_digi_output_data_t *p = (adc_digi_output_data_t *)raw_buf;
+
+				// Программное усиление (масштабирование)
+				for (int i = 0; i < count; i++) {
+				    uint16_t raw_val = p[i].type1.data & 0xFFF;
+				    int32_t centered = (int32_t)raw_val - g_threshold;
+				    int32_t scaled = (int32_t)(centered * g_gain) + g_threshold;
+				
+				    // Ограничиваем (clipping), чтобы не вылезти за 0-4095
+				    if (scaled > 4095) scaled = 4095;
+				    if (scaled < 0) scaled = 0;
+				
+				    p[i].type1.data = (uint16_t)scaled; // Записываем обратно
+				}
+
 
 				int start_idx = -1;
 				bool ready = false;
