@@ -8,7 +8,6 @@ Do not forget select your Wi-Fi network parameters and Height, Width of your ter
 
 ## 📸 Screenshots
 <p align="center">
-  <img src="./img/img/2026_03_29__19_25_02.png" width="400" title="Sine wave">
   <img src="./img/2026_03_29__19_27_27.png" width="400" title="Trigger settings">
 </p>
 
