@@ -1,7 +1,7 @@
 # ESP32_scope
 Very simple console wifii oscilloscope for linux on ESP-WROOM-32 
 
-Select your Wi-Fi network parameters and Height, Width of your terminal in the "main/conf.h" and top of the "scope.py" files!
+DDo not forget select your Wi-Fi network parameters and Height, Width of your terminal in the "main/conf.h" and top of the "scope.py" files!
 
 
 # 🚀 ESP32 CLI Network Oscilloscope
