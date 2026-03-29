@@ -19,9 +19,11 @@ v_threshold = 2000      # Vertical threshold(voltage threshold)
 sample_freq = 2000000   # Sample frequency
 t_scale = 1             # Time scale
 tr_state = 0            # Trigger state (on/off)
+tr_edge = 1             # Edge rising/falling
 v_gain = 1              # Voltage gain (Vertical scale)
 current_atten = 3       # Аттенюатор АЦП (3 - 3.3V max)
 current_offset = 0      # Voltage offset
+
 
 ATTEN_MAP = {
     0: 1.1,  # ADC_ATTEN_DB_0
@@ -97,7 +99,7 @@ def get_time_div():
         return f"{time_per_div:.2f} s/div"
 
 def command_thread():
-    global v_threshold, sample_freq, t_scale, tr_state, is_hold, v_gain, current_atten, current_offset, line_mode, clipping
+    global v_threshold, sample_freq, t_scale, tr_state, is_hold, v_gain, current_atten, current_offset, line_mode, clipping, tr_edge
     # Печатаем приглашение один раз в самом низу
     sys.stdout.write(f"\033[{HEIGHT+5};1H\033[KCommand> ")
     #sys.stdout.flush()
@@ -124,9 +126,12 @@ def command_thread():
                 val = int(parts[1])
                 sample_freq = val
                 sock.sendto(f"F{val}".encode(), (ESP32_IP, UDP_PORT))
-            elif parts[0] == 'm': # Sampling frequency
+            elif parts[0] == 'm': # Trigger on/off
                 tr_state = 0 if tr_state==1 else 1
                 sock.sendto(f"M{tr_state}".encode(), (ESP32_IP, UDP_PORT))
+            elif parts[0] == 'e': # Trigger edge (rising/falling)
+                tr_edge = 0 if tr_edge==1 else 1
+                sock.sendto(f"E{tr_edge}".encode(), (ESP32_IP, UDP_PORT))
             elif parts[0] == 'h':
                 is_hold = not is_hold
             elif parts[0] == 'l':
@@ -243,7 +248,7 @@ while True:
         draw_plot(view)
         
         # Выводим информацию
-        sys.stdout.write(f"Trigger Threshold(t): {v_threshold} | Sampling freq(f): {sample_freq} | Time scale(s): {t_scale} | Trigger(m) {"off" if tr_state==0 else "on"} | {get_time_div()} | {freq}     \n")
+        sys.stdout.write(f"Trigger Threshold(t): {v_threshold} | Sampling freq(f): {sample_freq} | Time scale(s): {t_scale} | Trigger(m) {"off" if tr_state==0 else "on"}, {'rising' if tr_edge else 'falling'} | {get_time_div()} | {freq}     \n")
         sys.stdout.write(f"Vpp: {v_pp:.3f}V | Vmin: {v_min:.3f} | Vmax: {v_max:.3f}V | Vavg: {v_avg:.3f}V | Vrms: {v_rms:.3f}V | {v_div_str} | Offset: {current_offset}")
         
         sys.stdout.write("\033[u")

@@ -28,6 +28,7 @@ bool g_trigger_enabled = false; // Trigger off
 float g_gain = 1.0; // Коэффициент усиления (1.0 = без изменений)
 int target_atten = ADC_ATTEN_DB_12; // Уровень аттенюации АЦП (hardware)
 int32_t g_offset = 0; // Смещение в "попугаях" АЦП (от -2048 до 2048)
+bool g_edge_rising = true; // true: Rising, false: Falling
 
 
 // Семафор для защиты АЦП
@@ -118,10 +119,12 @@ void feedback_command_task(void *pvParameters)
 			if (rx_buffer[0] == 'o') { // Команда "o -500"
 				g_offset = atoi(&rx_buffer[1]);
 			}			
+			if (rx_buffer[0] == 'E') {
+				g_edge_rising = atoi(&rx_buffer[1]);
+			}			
         }
 		vTaskDelay(pdMS_TO_TICKS(1000));
 	}
-
 }
 
 void udp_scope_task(void *pvParameters) 
@@ -202,8 +205,14 @@ void udp_scope_task(void *pvParameters)
 					// Поиск триггера по децимированным данным
 					if (g_trigger_enabled)
 						for (int i = 0; i < d_count - FRAME_SIZE; i++) {
-							if (!ready && decimated_buf[i] < g_thresh_low) ready = true;
-							if (ready && decimated_buf[i] > g_thresh_high) { start_idx = i; break; }
+							if (g_edge_rising) {
+								if (!ready && decimated_buf[i] < g_thresh_low) ready = true;
+								if (ready && decimated_buf[i] > g_thresh_high) { start_idx = i; break; }
+							}
+							else {
+								if (!ready && decimated_buf[i] > g_thresh_high) ready = true;
+								if (ready && decimated_buf[i] < g_thresh_low) { start_idx = i; break; }
+							}
 						}
 					else
 						start_idx = 0;
@@ -214,8 +223,14 @@ void udp_scope_task(void *pvParameters)
 					if (g_trigger_enabled)
 						for (int i = 0; i < count - FRAME_SIZE; i++) {
 							uint16_t val = p[i].type1.data & 0xFFF;
-							if (!ready && val < g_thresh_low) ready = true;
-							if (ready && val > g_thresh_high) { start_idx = i; break; }
+							if (g_edge_rising) {
+								if (!ready && val < g_thresh_low) ready = true;
+								if (ready && val > g_thresh_high) { start_idx = i; break; }
+							}
+							else {
+								if (!ready && val > g_thresh_high) ready = true;
+								if (ready && val < g_thresh_low) { start_idx = i; break; }
+							}
 						}
 					else
 						start_idx = 0;
