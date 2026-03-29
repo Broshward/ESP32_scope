@@ -3,14 +3,16 @@ Very simple console wifii oscilloscope for linux on ESP-WROOM-32
 Select your Wi-Fi network parameters in the "main/conf.h" and top of the "scope.py" files!
 
 
-🚀 ESP32 CLI Network Oscilloscope
+# 🚀 ESP32 CLI Network Oscilloscope
+
     A high-performance, "feng-shui" style oscilloscope in your terminal.
     Turn your ESP32 into a fast network-based measurement tool. 
     Minimalist, lag-free, and purely text-based (ANSI/VT100). 
     Perfect for debugging signals up to 3.3V, checking I2C/PWM, or just exploring the electromagnetic noise around you via a simple wire.
 
 
-🔥 Key Features
+# 🔥 Key Features
+
     DMA-Powered Capture: Uses ESP32's ADC with DMA and Core 1 pinning for high-speed sampling (up to 2MHz).
     Advanced CLI Interface:
         Separate Command Zone: Type commands without flickering or overwriting the plot.
@@ -20,7 +22,8 @@ Select your Wi-Fi network parameters in the "main/conf.h" and top of the "scope.
     Visual Feng-Shui: Automatic grid calculation for Time/div and Volt/div.
 
 
-⚡ Quick Start
+# ⚡ Quick Start
+
 1. Hardware Requirements
 
     ESP32 (WROOM/WROVER).
@@ -64,7 +67,7 @@ Type commands at the `Command>` prompt and press **Enter**.
 | **h** | `none` | `h` | Toggle Hold (Freeze frame) |
 
 
-📡 Network Setup
+# 📡 Network Setup
 
 Ensure your ESP32 and PC are on the same Wi-Fi network.
 
@@ -72,5 +75,5 @@ Ensure your ESP32 and PC are on the same Wi-Fi network.
     Optimization: The script uses ANSI Save/Restore cursor codes (\033[s and \033[u). Best viewed in urxvt, xterm, or modern VS Code terminals.
 
 
-📜 License
+# 📜 License
 MIT. Feel free to fork, improve, and share!
