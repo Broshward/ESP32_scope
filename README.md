@@ -1,7 +1,7 @@
 # ESP32_scope
 Very simple console wifii oscilloscope for linux on ESP-WROOM-32 
 
-DDo not forget select your Wi-Fi network parameters and Height, Width of your terminal in the "main/conf.h" and top of the "scope.py" files!
+Do not forget select your Wi-Fi network parameters and Height, Width of your terminal in the "main/conf.h" and top of the "scope.py" files!
 
 
 # 🚀 ESP32 CLI Network Oscilloscope
@@ -55,12 +55,12 @@ Type commands at the `Command>` prompt and press **Enter**.
 
 | Command | Parameter | Example | Description |
 | :--- | :--- | :--- | :--- |
-| **f** | `frequency` | `f 100000` | Set sampling rate (Hz) |
+| **f** | `frequency` | `f 100000` | Set sampling rate (Hz) (20000-2000000) |
 | **t** | `threshold` | `t 2500` | Set trigger level (0-4095) |
 | **e** | `0 or 1` | `e 0` | Trigger edge (1: Rising, 0: Falling) |
-| **s** | `value` | `s 10` | Time scale (decimation) |
-| **a** | `0-3` | `a 3` | Hardware Attenuation (0:1.1V...3:3.3V) |
-| **g** | `float` | `g 2.0` | Software Gain (Vertical zoom) |
+| **s** | `value` | `s 10` | Time scale (decimation) (1-30) |
+| **a** | `0-3` | `a 3` | Hardware Attenuation (0:1.1V, 1:1.5V, 2:2.2V, 3:3.3V) |
+| **g** | `float` | `g 2.0` | Software Gain (Vertical zoom) (1.0-) |
 | **o** | `int` | `o -500` | Vertical Offset (Shift trace) |
 | **m** | `none` | `m` | Trigger Mode |
 | **l** | `none` | `l` | Toggle Dots / Lines mode |
