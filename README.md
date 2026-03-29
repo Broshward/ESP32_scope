@@ -49,9 +49,8 @@ Select your Wi-Fi network parameters in the "main/conf.h" and top of the "scope.
    </code>
 
    
-### ⌨️ Command Console
+# ⌨️ Command Console
 Type commands at the `Command>` prompt and press **Enter**.
-
 
 | Command | Parameter | Example | Description |
 | :--- | :--- | :--- | :--- |
@@ -62,7 +61,7 @@ Type commands at the `Command>` prompt and press **Enter**.
 | **a** | `0-3` | `a 3` | Hardware Attenuation (0:1.1V...3:3.3V) |
 | **g** | `float` | `g 2.0` | Software Gain (Vertical zoom) |
 | **o** | `int` | `o -500` | Vertical Offset (Shift trace) |
-| **m** | `0 or 1` | `m 1` | Trigger Mode (1: Auto, 0: Roll) |
+| **m** | `none` | `m` | Trigger Mode |
 | **l** | `none` | `l` | Toggle Dots / Lines mode |
 | **h** | `none` | `h` | Toggle Hold (Freeze frame) |
 
