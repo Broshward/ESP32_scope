@@ -44,6 +44,7 @@ def init_esp32_for_scope():
         "O 0",    # Disable offset
         "T 2048"  # Threshold to middle
         "F 2000000" # Sample freq to max
+        "A 3"       # Attemuator to 3.3V
     ]
     for cmd in commands:
         sock.sendto(cmd.encode(), (ESP32_IP, UDP_PORT))
@@ -175,7 +176,7 @@ def command_thread():
             #    exit(0)
         except Exception as e:
             # Выводим ошибку на 29-ю строку, чтобы не ломать график
-            sys.stdout.write(f"\033[%d;1H\033[KError: {e}" %(HEIGHT+2))
+            sys.stdout.write(f"\033[%d;1H\033[KError: {e}" %(HEIGHT+5))
             
         # Очищаем строку ввода для следующей команды
         sys.stdout.write("\033[%d;1H\033[KCommand> " %(HEIGHT+5))
