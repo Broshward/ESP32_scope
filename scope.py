@@ -35,9 +35,13 @@ ATTEN_MAP = {
 def get_voltage_stats(view, atten_idx):
     max_v_range = ATTEN_MAP.get(atten_idx, 3.3)
     
+    # Превращаем беззнаковый uint16 в знаковый float или int32
+    # Это позволит нам уходить в минус без ошибок Overflow
+    view_safe = view.astype(np.float32) 
+        
     # Пересчитываем массив "попугаев" (0-4095) в Вольты
     # Сначала убираем смещение и возвращаем масштаб, потом переводим в вольты
-    raw_corrected = ((view - current_offset - v_threshold ) / v_gain) + v_threshold
+    raw_corrected = ((view_safe - current_offset - v_threshold ) / v_gain) + v_threshold
     voltages = raw_corrected * (max_v_range / 4095.0) / v_gain
     
     voltages = view * (max_v_range / 4095.0) / v_gain
@@ -248,8 +252,8 @@ while True:
         draw_plot(view)
         
         # Выводим информацию
-        sys.stdout.write(f"Trigger Threshold(t): {v_threshold} | Sampling freq(f): {sample_freq} | Time scale(s): {t_scale} | Trigger(m) {"off" if tr_state==0 else "on"}, {'rising' if tr_edge else 'falling'} | {get_time_div()} | {freq}     \n")
-        sys.stdout.write(f"Vpp: {v_pp:.3f}V | Vmin: {v_min:.3f} | Vmax: {v_max:.3f}V | Vavg: {v_avg:.3f}V | Vrms: {v_rms:.3f}V | {v_div_str} | Offset: {current_offset}")
+        sys.stdout.write(f"Trigger Threshold(t): {v_threshold} | Sampling freq(f): {sample_freq} | Time scale(s): {t_scale} | Trigger(m) {"off" if tr_state==0 else "on"}, {'rising' if tr_edge else 'falling'} | {get_time_div()} | {freq}\033[K\n")
+        sys.stdout.write(f"Vpp: {v_pp:.3f}V | Vmin: {v_min:.3f} | Vmax: {v_max:.3f}V | Vavg: {v_avg:.3f}V | Vrms: {v_rms:.3f}V | {v_div_str} | Offset(o): {current_offset} | Gain(g): {v_gain:.1f}\033[K")
         
         sys.stdout.write("\033[u")
         sys.stdout.flush()
