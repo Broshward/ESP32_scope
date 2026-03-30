@@ -5,6 +5,7 @@ import numpy as np
 import sys
 import threading
 import termios,tty
+import time
 
 # Настройки
 ESP32_IP = "192.168.1.51"
@@ -12,7 +13,7 @@ UDP_PORT = 8080
 WIDTH = 128
 HEIGHT = 30
 line_mode = 1           # Points connected with lines
-clipping = True         # Clipping ( Delete points 0..16, 4080..4095 )
+clipping = False        # Clipping ( Delete points 0..16, 4080..4095 )
 is_hold = 0             # Hold screen
 
 v_threshold = 2000      # Vertical threshold(voltage threshold)
@@ -23,7 +24,7 @@ tr_edge = 1             # Edge rising/falling
 v_gain = 1              # Voltage gain (Vertical scale)
 current_atten = 3       # Аттенюатор АЦП (3 - 3.3V max)
 current_offset = 0      # Voltage offset
-
+buffer_size = 128       # Input buffer
 
 ATTEN_MAP = {
     0: 1.1,  # ADC_ATTEN_DB_0
@@ -31,6 +32,22 @@ ATTEN_MAP = {
     2: 2.2,  # ADC_ATTEN_DB_6
     3: 3.3   # ADC_ATTEN_DB_12
 }
+
+def init_esp32_for_scope():
+    global sock
+    # Настройки для спектра
+    commands = [
+        f"B {WIDTH}", # Buffer size
+        "M 0",    # Disable trigger
+        "S 1",    # Disable decimation
+        "G 1.0",  # Disable gain
+        "O 0",    # Disable offset
+        "T 2048"  # Threshold to middle
+        "F 2000000" # Sample freq to max
+    ]
+    for cmd in commands:
+        sock.sendto(cmd.encode(), (ESP32_IP, UDP_PORT))
+        time.sleep(0.05) # Little pause
 
 def get_voltage_stats(view, atten_idx):
     max_v_range = ATTEN_MAP.get(atten_idx, 3.3)
@@ -103,7 +120,7 @@ def get_time_div():
         return f"{time_per_div:.2f} s/div"
 
 def command_thread():
-    global v_threshold, sample_freq, t_scale, tr_state, is_hold, v_gain, current_atten, current_offset, line_mode, clipping, tr_edge
+    global v_threshold, sample_freq, t_scale, tr_state, is_hold, v_gain, current_atten, current_offset, line_mode, clipping, tr_edge,  buffer_size
     # Печатаем приглашение один раз в самом низу
     sys.stdout.write(f"\033[{HEIGHT+5};1H\033[KCommand> ")
     #sys.stdout.flush()
@@ -221,9 +238,10 @@ sock.settimeout(0.5)
 #print("Осциллограф запущен. Жду UDP пакеты...")
 
 hold_flag=0
+init_esp32_for_scope()
 while True:
     try:
-        data_raw, addr = sock.recvfrom(2048)
+        data_raw, addr = sock.recvfrom(WIDTH*2)
         view = np.frombuffer(data_raw, dtype=np.uint16)[:WIDTH]
         # Сначала ПРОВЕРЯЕМ, что пришло. 
         # Если в view есть значения > 4095, значит данные битые
@@ -252,7 +270,7 @@ while True:
         draw_plot(view)
         
         # Выводим информацию
-        sys.stdout.write(f"Trigger Threshold(t): {v_threshold} | Sampling freq(f): {sample_freq} | Time scale(s): {t_scale} | Trigger(m) {"off" if tr_state==0 else "on"}, {'rising' if tr_edge else 'falling'} | {get_time_div()} | {freq}\033[K\n")
+        sys.stdout.write(f"Trigger Threshold(t): {v_threshold} | Sampling freq(f): {sample_freq} | Time scale(s): {t_scale} | Trigger(m) {"off" if tr_state==0 else "on"}, {'rising' if tr_edge else 'falling'}(e) | {get_time_div()} | {freq}\033[K\n")
         sys.stdout.write(f"Vpp: {v_pp:.3f}V | Vmin: {v_min:.3f} | Vmax: {v_max:.3f}V | Vavg: {v_avg:.3f}V | Vrms: {v_rms:.3f}V | {v_div_str} | Offset(o): {current_offset} | Gain(g): {v_gain:.1f}\033[K")
         
         sys.stdout.write("\033[u")
