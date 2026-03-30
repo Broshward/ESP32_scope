@@ -17,11 +17,12 @@
 
 #define PORT 8080
 #define UDP_PORT       8080
-#define FRAME_SIZE     128            // Количество точек в одном кадре
+#define MAX_FRAME_SIZE     2048            // 
 #define READ_LEN       8192           // Размер сырого буфера для поиска триггера
 
-int g_threshold = 2000;
-int g_thresh_low = 1800;
+int g_frame_size = 128;		// Output Buffer size default
+int g_threshold = 2000;		// Trigger threshold
+int g_thresh_low = 1800;	
 int g_thresh_high = 2200;
 int g_scale = 1; // По умолчанию 1:1 (Масштаб времени)
 bool g_trigger_enabled = false; // Trigger off
@@ -121,6 +122,13 @@ void feedback_command_task(void *pvParameters)
 			if (rx_buffer[0] == 'E') {
 				g_edge_rising = atoi(&rx_buffer[1]);
 			}			
+			if (rx_buffer[0] == 'B') {
+				int new_size = atoi(&rx_buffer[1]);
+				if (new_size > 0 && new_size <= MAX_FRAME_SIZE) { // Buffer size check
+					g_frame_size = new_size;
+					ESP_LOGI(TAG, "Frame size set to: %d", g_frame_size);
+				}
+			}			
         }
 		vTaskDelay(pdMS_TO_TICKS(1000));
 	}
@@ -146,7 +154,7 @@ void udp_scope_task(void *pvParameters)
 
     // Буферы
     uint8_t *raw_buf = malloc(READ_LEN);
-    uint16_t *frame_to_send = malloc(FRAME_SIZE * sizeof(uint16_t));
+    uint16_t *frame_to_send = malloc(MAX_FRAME_SIZE * sizeof(uint16_t));
 #define DECIMATED_SIZE READ_LEN/2 // Буфер для поиска триггера
 	uint16_t decimated_buf[DECIMATED_SIZE];
 	uint16_t* send_ptr; // Указатель на то, что будем отправлять
@@ -193,13 +201,13 @@ void udp_scope_task(void *pvParameters)
 			if (g_scale > 1) {
 				// --- МЕДЛЕННЫЙ РЕЖИМ (Децимация) ---
 				int d_count = 0;
-				for (int i = 0; i < count && d_count < FRAME_SIZE * 2; i += g_scale) {
+				for (int i = 0; i < count && d_count < g_frame_size * 2; i += g_scale) {
 					decimated_buf[d_count++] = p[i].type1.data & 0xFFF;
 				}
 				
 				// Поиск триггера по децимированным данным
 				if (g_trigger_enabled)
-					for (int i = 0; i < d_count - FRAME_SIZE; i++) {
+					for (int i = 0; i < d_count - g_frame_size; i++) {
 						if (g_edge_rising) {
 							if (!ready && decimated_buf[i] < g_thresh_low) ready = true;
 							if (ready && decimated_buf[i] > g_thresh_high) { start_idx = i; break; }
@@ -216,7 +224,7 @@ void udp_scope_task(void *pvParameters)
 			else {
 				// --- БЫСТРЫЙ РЕЖИМ (Прямой поиск) ---
 				if (g_trigger_enabled)
-					for (int i = 0; i < count - FRAME_SIZE; i++) {
+					for (int i = 0; i < count - g_frame_size; i++) {
 						uint16_t val = p[i].type1.data & 0xFFF;
 						if (g_edge_rising) {
 							if (!ready && val < g_thresh_low) ready = true;
@@ -232,13 +240,13 @@ void udp_scope_task(void *pvParameters)
 
 				// Формируем кадр напрямую из p (нужно скопировать в frame_to_send, т.к. p - структура)
 				if (start_idx != -1) {
-					for(int j=0; j<FRAME_SIZE; j++) frame_to_send[j] = p[start_idx+j].type1.data & 0xFFF;
+					for(int j=0; j<g_frame_size; j++) frame_to_send[j] = p[start_idx+j].type1.data & 0xFFF;
 					send_ptr = frame_to_send;
 				}
 			}
 
 			if (start_idx != -1) {
-				sendto(sock, send_ptr, FRAME_SIZE * 2, 0, (struct sockaddr *)&dest_addr, sizeof(dest_addr));
+				sendto(sock, send_ptr, g_frame_size * 2, 0, (struct sockaddr *)&dest_addr, sizeof(dest_addr));
 				vTaskDelay(pdMS_TO_TICKS(100)); 
 			}
 			else 
