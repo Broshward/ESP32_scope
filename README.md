@@ -5,12 +5,6 @@ Do not forget select your Wi-Fi network parameters and Height, Width of your ter
 
 ## 📺 Demo
 [![asciicast](https://asciinema.org/a/JcjFxvt14TXTyzo1.svg)](https://asciinema.org/a/JcjFxvt14TXTyzo1)
-![ESP32 Scope in action](./img/demo.gif)
-
-## 📸 Screenshots
-<p align="center">
-  <img src="./img/2026_03_29__19_27_27.png" width="400" title="Trigger settings">
-</p>
 
 
 # 🚀 ESP32 CLI Network Oscilloscope
