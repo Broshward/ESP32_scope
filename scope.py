@@ -8,7 +8,7 @@ import termios,tty
 import time
 
 # Настройки
-ESP32_IP = "192.168.1.51"
+ESP32_IP = "192.168.43.3"
 UDP_PORT = 8080
 WIDTH = 128
 HEIGHT = 30
@@ -172,6 +172,8 @@ def command_thread():
                 val = int(parts[1])
                 current_offset = val
                 sock.sendto(f"o{val}".encode(), (ESP32_IP, UDP_PORT))
+            elif parts[0] == 'w':
+                sock.sendto(f"W{' '.join(parts[1:])}".encode(), (ESP32_IP, UDP_PORT))
             #elif parts[0] == 'q': 
             #    exit(0)
         except Exception as e:

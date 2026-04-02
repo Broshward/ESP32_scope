@@ -3,6 +3,7 @@
 #include "freertos/task.h"
 #include "esp_adc/adc_continuous.h"
 #include "esp_log.h"
+#include "driver/dac_cosine.h"
 
 #include <string.h>
 #include <sys/param.h>
@@ -30,14 +31,36 @@ float g_gain = 1.0; // Коэффициент усиления (1.0 = без и�
 int target_atten = ADC_ATTEN_DB_12; // Уровень аттенюации АЦП (hardware)
 int32_t g_offset = 0; // Смещение в "попугаях" АЦП (от -2048 до 2048)
 bool g_edge_rising = true; // true: Rising, false: Falling
-
-
-// Семафор для защиты АЦП
-volatile uint32_t target_freq = 100000;
+volatile uint32_t target_freq = 2000000; // 
 volatile bool need_reconfig = false;
 
-
 static const char *TAG = "UDP_SCOPE";
+
+
+// Глобальные настройки генератора
+dac_cosine_handle_t chan0_handle;
+uint32_t gen_freq = 1000;
+int8_t gen_offset = 0;
+dac_cosine_atten_t gen_atten = DAC_COSINE_ATTEN_DEFAULT;
+
+void update_generator() {
+    if (chan0_handle) {
+        dac_cosine_stop(chan0_handle);
+        dac_cosine_del_channel(chan0_handle); // Пересоздаем для смены параметров
+    }
+
+    dac_cosine_config_t cos_cfg = {
+        .chan_id = DAC_CHAN_0,         // GPIO 25
+        .freq_hz = gen_freq,
+        .clk_src = DAC_COSINE_CLK_SRC_DEFAULT,
+        .offset = gen_offset,          // Наш аппаратный Offset
+        .atten = gen_atten,            // Наша амплитуда
+        .phase = DAC_COSINE_PHASE_0,
+    };
+    
+    ESP_ERROR_CHECK(dac_cosine_new_channel(&cos_cfg, &chan0_handle));
+    ESP_ERROR_CHECK(dac_cosine_start(chan0_handle));
+}
 
 // Функция (пере)конфигурации
 void configure_adc(adc_continuous_handle_t handle, uint32_t freq, adc_atten_t atten) 
@@ -129,8 +152,21 @@ void feedback_command_task(void *pvParameters)
 					ESP_LOGI(TAG, "Frame size set to: %d", g_frame_size);
 				}
 			}			
+			if (rx_buffer[0] == 'W') {
+				// Формат: W 1000 0 0 (Freq, Atten_idx, Offset)
+				int atten_idx,offset_val;
+				sscanf(rx_buffer + 1, "%lu %d %d", &gen_freq, &atten_idx, &offset_val);
+				
+				// Мапим индекс аттенюации (0-3) в константы IDF
+				dac_cosine_atten_t levels[] = {DAC_COSINE_ATTEN_DB_0, DAC_COSINE_ATTEN_DB_6, 
+											   DAC_COSINE_ATTEN_DB_12, DAC_COSINE_ATTEN_DB_18};
+				gen_atten = levels[atten_idx];
+				gen_offset = (int8_t)offset_val;
+				
+				update_generator();
+			}
         }
-		vTaskDelay(pdMS_TO_TICKS(1000));
+		vTaskDelay(pdMS_TO_TICKS(500));
 	}
 }
 

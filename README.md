@@ -24,6 +24,7 @@ Do not forget select your Wi-Fi network parameters and Height, Width of your ter
         Smart Trigger: Hardware-based trigger with hysteresis and "Gain-aware" logic.
     On-the-fly Metrology: Real-time calculation of Vpp, RMS, Average Voltage, and Frequency.
     Visual Feng-Shui: Automatic grid calculation for Time/div and Volt/div.
+    Sine generator can be switch on GPIO26 (see command description)
 
 
 # ⚡ Quick Start
@@ -34,6 +35,7 @@ Do not forget select your Wi-Fi network parameters and Height, Width of your ter
     Input Pin: GPIO 34 (ADC1_CH6).
     Signal Range: 0V to 3.3V ONLY.
     WARNING: ⚠️ Connecting higher voltages (like 220V or even 5V) will destroy your ESP32 instantly. Use a voltage divider for higher ranges!
+    Output Sine Signal Generator on GPIO 25.
 
 2. Firmware (ESP-IDF)
    
@@ -68,6 +70,7 @@ Type commands at the `Command>` prompt and press **Enter**.
 | **m** | `none` | `m` | Trigger Mode toggle (on/off) |
 | **l** | `none` | `l` | Toggle Dots / Lines mode |
 | **h** | `none` | `h` | Toggle Hold (Freeze frame) |
+| **w** | `freq atten offset` | `w 1000 0 0` | Generator output param |
 
 
 # 📡 Network Setup
