@@ -168,16 +168,17 @@ def command_thread():
                 val = int(parts[1]) # 0 (1.1V), 1 (1.5V), 2 (2.2V), 3 (3.3V)
                 current_atten = val
                 sock.sendto(f"A{val}".encode(), (ESP32_IP, UDP_PORT))
-            elif parts[0] == 'o': # Signal gain
+            elif parts[0] == 'o': # Signal offset
                 val = int(parts[1])
                 current_offset = val
                 sock.sendto(f"o{val}".encode(), (ESP32_IP, UDP_PORT))
-            elif parts[0] == 'w':
+            elif parts[0] == 'w': # Sine generator
                 sock.sendto(f"W{' '.join(parts[1:])}".encode(), (ESP32_IP, UDP_PORT))
+            elif parts[0] == 'p': # Square generator
+                sock.sendto(f"P{' '.join(parts[1:])}".encode(), (ESP32_IP, UDP_PORT))
             #elif parts[0] == 'q': 
             #    exit(0)
         except Exception as e:
-            # Выводим ошибку на 29-ю строку, чтобы не ломать график
             sys.stdout.write(f"\033[%d;1H\033[KError: {e}" %(HEIGHT+5))
             
         # Очищаем строку ввода для следующей команды

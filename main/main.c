@@ -15,6 +15,7 @@
 
 #include "wifi.h"
 #include "conf.h"
+#include "pwm.h"
 
 #define PORT 8080
 #define UDP_PORT       8080
@@ -37,6 +38,8 @@ volatile bool need_reconfig = false;
 static const char *TAG = "UDP_SCOPE";
 
 
+// Если это первый запуск - инициализируем, иначе просто обновляем
+static bool pwm_inited = false;
 // Глобальные настройки генератора
 dac_cosine_handle_t chan0_handle;
 uint32_t gen_freq = 1000;
@@ -165,8 +168,21 @@ void feedback_command_task(void *pvParameters)
 				
 				update_generator();
 			}
+			if (rx_buffer[0] == 'P') { // Команда "P 1000 512" (Freq, Duty)
+				uint32_t freq;
+				uint32_t duty;
+				sscanf(rx_buffer + 1, "%lu %lu", &freq, &duty);
+				
+				if (!pwm_inited) {
+					init_square_gen(freq, duty);
+					pwm_inited = true;
+				} else {
+					update_square_freq(freq,duty);
+				}
+				ESP_LOGI("PWM", "Square wave: %lu Hz, Duty: %lu", freq, duty);
+			}
         }
-		vTaskDelay(pdMS_TO_TICKS(500));
+		vTaskDelay(pdMS_TO_TICKS(100));
 	}
 }
 
